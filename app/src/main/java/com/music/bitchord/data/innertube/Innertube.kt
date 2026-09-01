@@ -135,7 +135,7 @@ object Innertube {
     private val json = Json { ignoreUnknownKeys = true }
 
     /** See [postPlayer] — the per-request ceiling on the walk's hot path. */
-    private const val PLAYER_TIMEOUT_MS = 6_000L
+    private const val PLAYER_TIMEOUT_MS = 3_000L
 
     private val client = HttpClient(OkHttp) {
         // Same OkHttp instance ExoPlayer streams through — see Http.

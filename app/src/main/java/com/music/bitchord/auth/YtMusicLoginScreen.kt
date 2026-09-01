@@ -50,7 +50,7 @@ fun YtMusicLoginScreen(
 
                 loadUrl(
                     "https://accounts.google.com/ServiceLogin" +
-                        "?ltmpl=music&service=youtube&passive=true" +
+                        "?service=youtube&passive=true" +
                         "&continue=https%3A%2F%2Fmusic.youtube.com%2F",
                 )
             }
