@@ -19,7 +19,7 @@ jobs:
 
     - name: Setup Secrets (Keystore & local.properties)
       run: |
-                echo "MODULE_INDEX_URL=${{ secrets.MODULE_INDEX_URL }}" > local.properties
+        echo "MODULE_INDEX_URL=${{ secrets.MODULE_INDEX_URL }}" > local.properties
         echo "LASTFM_API_KEY=${{ secrets.LASTFM_API_KEY }}" >> local.properties
         echo "LASTFM_SECRET=${{ secrets.LASTFM_SECRET }}" >> local.properties
         
