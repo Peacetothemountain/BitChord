@@ -33,7 +33,7 @@ jobs:
       run: chmod +x gradlew
 
     - name: Build Signed Prod Release APK
-      run: ./gradlew assembleProdRelease
+      run: if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then ./gradlew assembleProdDebug; else ./gradlew assembleProdRelease; fi
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
