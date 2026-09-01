@@ -690,7 +690,7 @@ object StreamResolver {
      *   (see [Downloader.fetch][com.music.bitchord.download.Downloader.fetch]),
      *   must not splice two different renditions into one file.
      */
-    suspend fun resolveForDownload(videoId: String, maxKbps: Int = Int.MAX_VALUE): Stream {
+    suspend fun resolveForDownload(videoId: String, maxKbps: Int): Stream {
         val stream = downloadStream(videoId, maxKbps)
         // Belt and braces on the one invariant the media store enforces for us,
         // and enforces badly: everything in [downloadStream] selects for MP4,
