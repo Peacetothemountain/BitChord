@@ -107,7 +107,7 @@ fun CanvasArtworkPlayer(
             // Shares the app's one OkHttp client, as everything that fetches
             // over the network here does.
             .setMediaSourceFactory(
-                DefaultMediaSourceFactory(OkHttpDataSource.Factory(Http.client)),
+                DefaultMediaSourceFactory(com.music.bitchord.data.canvas.CanvasCache.dataSourceFactory(OkHttpDataSource.Factory(Http.client))),
             )
             .build()
             .apply {

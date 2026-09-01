@@ -41,7 +41,7 @@ class AuthStore(context: Context) {
         set(value) = prefs.edit().putString(KEY_COOKIE, value).apply()
 
     val isSignedIn: Boolean
-        get() = cookie?.contains("SAPISID") == true
+        get() = cookie?.let { it.contains("SAPISID") || it.contains("__Secure-3PAPISID") } == true
 
     /** The Discord account's bearer token. See DiscordRPC for why a user token. */
     var discordToken: String?

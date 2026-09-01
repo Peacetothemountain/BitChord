@@ -208,7 +208,9 @@ object YtMusicRepository {
                 .map { (title, browseId) ->
                     async {
                         val items = runCatching {
-                            InnertubeParser.parseLibraryItems(Innertube.browse(browseId))
+                            kotlinx.coroutines.withTimeoutOrNull(5000L) {
+                                InnertubeParser.parseLibraryItems(Innertube.browse(browseId))
+                            } ?: emptyList()
                         }.getOrDefault(emptyList())
                         HomeShelf(title, items)
                     }

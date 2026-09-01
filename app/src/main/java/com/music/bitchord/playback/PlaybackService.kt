@@ -618,7 +618,17 @@ class PlaybackService : MediaSessionService() {
         // other effect attached to the app applies to whichever player happens
         // to be audible. Without it a crossfade would audibly change EQ halfway
         // through, and again at every handoff.
-        sparePlayer.audioSessionId = exoPlayer.audioSessionId
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        val sessionId = audioManager.generateAudioSessionId()
+        exoPlayer.audioSessionId = sessionId
+        sparePlayer.audioSessionId = sessionId
+
+        sendBroadcast(
+            Intent(android.media.audiofx.AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION).apply {
+                putExtra(android.media.audiofx.AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
+                putExtra(android.media.audiofx.AudioEffect.EXTRA_PACKAGE_NAME, packageName)
+            }
+        )
 
         AppSettings.audioSessionId.value = exoPlayer.audioSessionId
         applySettings(exoPlayer)
@@ -2560,6 +2570,14 @@ class PlaybackService : MediaSessionService() {
         crossfade = null
         mediaSession?.release()
         mediaSession = null
+        player?.audioSessionId?.let { sessionId ->
+            sendBroadcast(
+                Intent(android.media.audiofx.AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION).apply {
+                    putExtra(android.media.audiofx.AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
+                    putExtra(android.media.audiofx.AudioEffect.EXTRA_PACKAGE_NAME, packageName)
+                }
+            )
+        }
         player?.removeListener(playbackListener)
         player?.removeAnalyticsListener(formatListener)
         player?.release()

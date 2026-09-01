@@ -112,6 +112,7 @@ object Innertube {
      */
     private suspend fun fetchVisitorData(): String? {
         val body = client.get("https://www.youtube.com/sw.js_data") {
+            timeout { requestTimeoutMillis = 3000 }
             header("User-Agent", WEB_USER_AGENT)
         }.bodyAsText()
         val payload = Json.parseToJsonElement(body.substringAfter("\n", body.drop(5)))
@@ -294,9 +295,32 @@ object Innertube {
          * region block or takedown is not.
          */
         val looksLikeBotCheck: Boolean
-            get() = reason.contains("bot", ignoreCase = true) ||
-                reason.contains("unusual traffic", ignoreCase = true) ||
-                reason.contains("sign in", ignoreCase = true)
+            get() = !isAgeGate && (
+                reason.contains("bot", ignoreCase = true) ||
+                    reason.contains("unusual traffic", ignoreCase = true) ||
+                    reason.contains("sign in", ignoreCase = true) ||
+                    reason.contains("login_required", ignoreCase = true)
+                )
+
+        val isAgeGate: Boolean
+            get() = reason.contains("confirm your age", ignoreCase = true) ||
+                reason.contains("age-restricted", ignoreCase = true) ||
+                reason.contains("age restricted", ignoreCase = true) ||
+                reason.contains("inappropriate for some users", ignoreCase = true)
+
+        val isPermanent: Boolean
+            get() = PERMANENT_REASONS.any { reason.contains(it, ignoreCase = true) }
+
+        private companion object {
+            private val PERMANENT_REASONS = listOf(
+                "not available in your country",
+                "who has blocked it in your country",
+                "removed by the uploader",
+                "private",
+                "payment",
+                "unavailable"
+            )
+        }
     }
 
     /** The stats endpoints a player response nominates for one playback. */
@@ -369,6 +393,7 @@ object Innertube {
         cpn: String,
         extras: HttpRequestBuilder.() -> Unit,
     ): Int = client.get(baseUrl) {
+        timeout { requestTimeoutMillis = 3000 }
         parameter("ver", "2")
         parameter("c", "WEB_REMIX")
         parameter("cver", WEB_REMIX_VERSION)
@@ -599,7 +624,12 @@ object Innertube {
                                 put("gl", "US")
                                 visitorData?.let { put("visitorData", it) }
                             }
-                            putJsonObject("user") { put("lockedSafetyMode", false) }
+                            putJsonObject("user") { 
+                                put("lockedSafetyMode", false) 
+                                cookie?.let { c ->
+                                    delegatedSessionIdFrom(c)?.let { put("onBehalfOfUser", it) }
+                                }
+                            }
                             putJsonObject("request") { put("useSsl", true) }
                         }
                         bodyExtras()
@@ -711,9 +741,16 @@ object Innertube {
         else -> null
     }
 
-    private fun sapisidFrom(cookieHeader: String): String? =
+    private fun sapisidFrom(cookieHeader: String): String? {
+        val pieces = cookieHeader.split("; ", ";").map { it.trim() }
+        val sapisid = pieces.firstOrNull { it.startsWith("SAPISID=") }?.substringAfter("=")
+        val secure3P = pieces.firstOrNull { it.startsWith("__Secure-3PAPISID=") }?.substringAfter("=")
+        return secure3P ?: sapisid
+    }
+
+    private fun delegatedSessionIdFrom(cookieHeader: String): String? =
         cookieHeader.split("; ", ";")
-            .firstOrNull { it.trim().startsWith("SAPISID=") }
+            .firstOrNull { it.trim().startsWith("DELEGATED_SESSION_ID=") }
             ?.substringAfter("=")
 
     private fun sapisidHash(sapisid: String, origin: String = MUSIC_ORIGIN): String {

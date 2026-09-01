@@ -81,10 +81,10 @@ internal object QuickJsExecutor {
                             var exports = module.exports;
                             var self = {};
                             $cleanCode
-                            if (module.exports && (module.exports.searchTracks || module.exports.getTrackStreamUrl)) {
+                            if (Object.keys(module.exports).length > 0) {
                                 return module.exports;
                             }
-                            return {};
+                            return exports;
                         } catch(e) {
                             __spine_iife_error = e && e.message ? e.message : String(e);
                             return {};
@@ -146,7 +146,13 @@ internal object QuickJsExecutor {
                     """.trimIndent()
                 )
 
-                val rawResult = qjs.evaluate<String>("__spine_resolved_json")
+                var rawResult = "undefined"
+                var tries = 0
+                while (rawResult == "undefined" && tries < 100) {
+                    kotlinx.coroutines.delay(50)
+                    rawResult = qjs.evaluate<String>("__spine_resolved_json") ?: "undefined"
+                    tries++
+                }
                 TrackLog.d(TAG, "  callExport result (${rawResult.length} chars): ${rawResult.take(500)}")
                 rawResult
             }.onFailure {
@@ -479,6 +485,33 @@ internal object QuickJsExecutor {
                         if (m2) { this.hostname = m2[1]; this.pathname = m2[2] || '/'; }
                     }
                 } catch(e) {}
+            };
+        }
+
+        if (typeof URLSearchParams === 'undefined') {
+            var URLSearchParams = function(init) {
+                this.dict = {};
+                if (typeof init === 'string') {
+                    var pairs = init.replace(/^\?/, '').split('&');
+                    for (var i = 0; i < pairs.length; i++) {
+                        var pair = pairs[i].split('=');
+                        if (pair[0]) this.append(decodeURIComponent(pair[0]), decodeURIComponent(pair[1] || ''));
+                    }
+                }
+            };
+            URLSearchParams.prototype.append = function(name, value) {
+                if (!this.dict[name]) this.dict[name] = [];
+                this.dict[name].push(String(value));
+            };
+            URLSearchParams.prototype.toString = function() {
+                var out = [];
+                for (var key in this.dict) {
+                    var vals = this.dict[key];
+                    for (var i = 0; i < vals.length; i++) {
+                        out.push(encodeURIComponent(key) + '=' + encodeURIComponent(vals[i]));
+                    }
+                }
+                return out.join('&');
             };
         }
     """

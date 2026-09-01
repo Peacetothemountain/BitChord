@@ -112,24 +112,36 @@ object PlaybackTracker {
         }
     }
 
-    private suspend fun open(videoId: String) = lock.withLock {
+    private suspend fun open(videoId: String) {
         val tracking = Innertube.playbackTracking(videoId)
         if (tracking == null) {
             TrackLog.d(TAG, "no playback tracking for $videoId (guest, or player call failed)")
-            return@withLock
+            return
         }
         val fresh = Session(videoId, Innertube.newCpn(), tracking)
-        val status = Innertube.pingPlayback(tracking.playbackUrl, fresh.cpn)
-        session = fresh
-        _registeredPlays.value++
-        TrackLog.d(TAG, "history entry created for $videoId (HTTP $status)")
+        lock.withLock {
+            session = fresh
+        }
+        runCatching {
+            val status = Innertube.pingPlayback(tracking.playbackUrl, fresh.cpn)
+            _registeredPlays.value++
+            TrackLog.d(TAG, "history entry created for $videoId (HTTP $status)")
+        }.onFailure {
+            TrackLog.w(TAG, "history registration ping failed (adblocker?): ${it.message}")
+        }
     }
 
-    private suspend fun flush(target: Session, positionSeconds: Long) = lock.withLock {
-        val url = target.tracking.watchtimeUrl ?: return@withLock
-        if (positionSeconds <= target.reportedSeconds) return@withLock
-        val status = Innertube.pingWatchtime(url, target.cpn, positionSeconds)
-        target.reportedSeconds = positionSeconds
-        TrackLog.d(TAG, "watchtime ${positionSeconds}s reported for ${target.videoId} (HTTP $status)")
+    private suspend fun flush(target: Session, positionSeconds: Long) {
+        val url = target.tracking.watchtimeUrl ?: return
+        lock.withLock {
+            if (positionSeconds <= target.reportedSeconds) return
+            target.reportedSeconds = positionSeconds
+        }
+        runCatching {
+            val status = Innertube.pingWatchtime(url, target.cpn, positionSeconds)
+            TrackLog.d(TAG, "watchtime ${positionSeconds}s reported for ${target.videoId} (HTTP $status)")
+        }.onFailure {
+            TrackLog.w(TAG, "watchtime ping failed (adblocker?): ${it.message}")
+        }
     }
 }

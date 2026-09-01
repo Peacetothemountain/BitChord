@@ -40,7 +40,7 @@ android {
         // Haze falls back to a translucent scrim below that.
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
+        versionCode = 11
         versionName = "1.4.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -109,8 +109,7 @@ android {
                 "proguard-rules.pro"
             )
             // Null without keystore.properties: the build then produces
-            // app-release-unsigned.apk instead of failing outright.
-            signingConfig = signingConfigs.findByName("release")
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

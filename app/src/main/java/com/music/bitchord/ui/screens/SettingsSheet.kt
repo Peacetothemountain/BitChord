@@ -792,7 +792,11 @@ private fun openEqualizer(context: Context, sessionId: Int) {
         putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC)
     }
     runCatching { context.startActivity(intent) }.onFailure {
-        Toast.makeText(context, "No system equalizer on this device", Toast.LENGTH_SHORT).show()
+        runCatching {
+            context.startActivity(Intent(android.provider.Settings.ACTION_SOUND_SETTINGS))
+        }.onFailure {
+            Toast.makeText(context, "No system equalizer on this device", Toast.LENGTH_SHORT).show()
+        }
     }
 }
 
