@@ -47,6 +47,7 @@ fun YtMusicLoginScreen(
                         // succeed while every request stayed anonymous.
                         if (cookies != null && AuthStore.hasApiSid(cookies)) {
                             captured = true
+                            CookieManager.getInstance().flush()
                             onCookiesCaptured(cookies)
                         }
                     }

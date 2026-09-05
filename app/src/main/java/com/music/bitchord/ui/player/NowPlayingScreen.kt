@@ -1827,6 +1827,11 @@ fun NowPlayingScreen(
             ThinSlider(
                 value = shown,
                 onValueChange = {
+                    val oldStep = (scrubValue * 50).toInt()
+                    val newStep = (it * 50).toInt()
+                    if (oldStep != newStep) {
+                        haptics.play(Haptic.ScrubTick)
+                    }
                     scrubbing = true
                     scrubValue = it
                 },
@@ -2051,6 +2056,9 @@ fun NowPlayingScreen(
                     ThinSlider(
                         value = volume.value,
                         onValueChange = {
+                            if ((it <= 0.02f && volume.value > 0.02f) || (it >= 0.98f && volume.value < 0.98f)) {
+                                haptics.play(Haptic.Detent)
+                            }
                             volumeDragging = true
                             // Follow the finger exactly; only external changes tween.
                             scope.launch { volume.snapTo(it) }
