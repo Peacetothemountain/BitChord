@@ -96,7 +96,7 @@ fun ThinSlider(
     )
 
     // Wave amplitude smooth transition: wavy while playing, straightens when paused or dragged
-    val targetWaveAmplitude = if (squiggly && isPlaying && !dragging) 3.5.dp else 0.dp
+    val targetWaveAmplitude = if (squiggly) 3.5.dp else 0.dp
     val waveAmplitude by animateDpAsState(
         targetValue = targetWaveAmplitude,
         animationSpec = spring(
