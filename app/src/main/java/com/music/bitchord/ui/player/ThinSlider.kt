@@ -30,16 +30,22 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlin.math.PI
+import kotlin.math.min
+import kotlin.math.sin
 
 /**
- * Apple Music's scrubber: a hairline capsule with no thumb knob, which
- * thickens under your finger and settles back when you let go. Material's
- * Slider can't be shaped like this — it always draws a thumb and a tall
- * track — so this is drawn directly.
+ * Material 3 squiggly line slider for track progress and volume control.
+ * Features an undulating sinusoidal wave while playing, seamlessly smoothing
+ * flat on pause or drag.
  */
 @Composable
 fun ThinSlider(
@@ -49,22 +55,23 @@ fun ThinSlider(
     onValueChangeFinished: (() -> Unit)? = null,
     /**
      * Sends a sheen travelling along the played portion for as long as it is
-     * true. Reserved for a transition that genuinely mixed — see
-     * [com.music.bitchord.data.settings.AppSettings.smartMixInProgress].
+     * true. Reserved for a transition that genuinely mixed.
      */
     mixing: Boolean = false,
     /**
      * Span of the track, as fractions of its duration, that the next Automix
-     * transition is planned to occupy. Drawn as a brighter stretch of the
-     * unplayed bar so the mix is visible before it arrives.
+     * transition is planned to occupy.
      */
     transitionWindow: ClosedFloatingPointRange<Float>? = null,
-    idleHeight: Dp = 7.dp,
-    activeHeight: Dp = 12.dp,
+    idleHeight: Dp = 6.dp,
+    activeHeight: Dp = 10.dp,
     activeColor: Color = Color.White.copy(alpha = 0.92f),
     inactiveColor: Color = Color.White.copy(alpha = 0.26f),
-    /** Halfway between the two track colours: visible against unplayed, invisible under played. */
     markerColor: Color = Color.White.copy(alpha = 0.5f),
+    /** Whether to render the signature Google Material 3 squiggly wave. */
+    squiggly: Boolean = true,
+    /** True when music is currently playing, driving the squiggly wave oscillation. */
+    isPlaying: Boolean = true,
 ) {
     var dragging by remember { mutableStateOf(false) }
     val height by animateDpAsState(
@@ -76,14 +83,33 @@ fun ThinSlider(
         label = "sliderHeight",
     )
 
+    // Undulating wave phase animation
+    val infiniteTransition = rememberInfiniteTransition(label = "squigglyPhase")
+    val wavePhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "wavePhase",
+    )
+
+    // Wave amplitude smooth transition: wavy while playing, straightens when paused or dragged
+    val targetWaveAmplitude = if (squiggly && isPlaying && !dragging) 3.5.dp else 0.dp
+    val waveAmplitude by animateDpAsState(
+        targetValue = targetWaveAmplitude,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "waveAmp",
+    )
+
     Box(
         modifier = modifier
             .fillMaxWidth()
-            // Generous invisible touch target — the visible bar is only ~7dp.
-            .height(activeHeight + 22.dp)
-            // One gesture loop for both taps and drags. Two separate detectors
-            // — a drag one plus a tap one — meant taps never landed: the drag
-            // detector took the pointer and a tap has no drag to report.
+            .height(activeHeight + 24.dp)
             .pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -112,41 +138,85 @@ fun ThinSlider(
         Canvas(
             Modifier
                 .fillMaxWidth()
-                .height(height),
+                .height(height + 16.dp),
         ) {
-            val radius = CornerRadius(size.height / 2f)
-            drawRoundRect(color = inactiveColor, cornerRadius = radius)
-            // Between the two track colours, and drawn *under* the played fill:
-            // once the playhead reaches the window the transition is no longer
-            // upcoming, and the ordinary progress colour taking it over is what
-            // says so.
+            val trackStroke = height.toPx()
+            val centerY = size.height / 2f
+            val radius = CornerRadius(trackStroke / 2f)
+
+            // Inactive background track
+            drawRoundRect(
+                color = inactiveColor,
+                topLeft = Offset(0f, centerY - trackStroke / 2f),
+                size = Size(size.width, trackStroke),
+                cornerRadius = radius,
+            )
+
+            // Transition window marker
             transitionWindow?.let { window ->
                 val from = size.width * window.start.coerceIn(0f, 1f)
                 val to = size.width * window.endInclusive.coerceIn(0f, 1f)
                 if (to > from) {
                     drawRoundRect(
                         color = markerColor,
-                        topLeft = Offset(from, 0f),
-                        size = Size(to - from, size.height),
+                        topLeft = Offset(from, centerY - trackStroke / 2f),
+                        size = Size(to - from, trackStroke),
                         cornerRadius = radius,
                     )
                 }
             }
+
             val filled = size.width * value.coerceIn(0f, 1f)
+            val ampPx = waveAmplitude.toPx()
+
             if (filled > 0f && !mixing) {
-                drawRoundRect(
-                    color = activeColor,
-                    size = Size(filled.coerceAtLeast(size.height), size.height),
-                    cornerRadius = radius,
-                )
+                if (ampPx > 0.15f) {
+                    // Draw squiggly sine wave along played portion
+                    val waveLengthPx = 22.dp.toPx()
+                    val dampDistance = 14.dp.toPx()
+                    val wavePath = Path()
+                    wavePath.moveTo(0f, centerY)
+
+                    val stepPx = 2.dp.toPx()
+                    var x = 0f
+                    while (x <= filled) {
+                        val startDamp = (x / dampDistance).coerceIn(0f, 1f)
+                        val endDamp = ((filled - x) / dampDistance).coerceIn(0f, 1f)
+                        val damp = min(startDamp, endDamp)
+                        val y = centerY + sin((x / waveLengthPx) * 2f * PI.toFloat() - wavePhase) * ampPx * damp
+                        wavePath.lineTo(x, y)
+                        x += stepPx
+                    }
+                    wavePath.lineTo(filled, centerY)
+
+                    drawPath(
+                        path = wavePath,
+                        color = activeColor,
+                        style = Stroke(
+                            width = trackStroke,
+                            cap = StrokeCap.Round,
+                            join = StrokeJoin.Round,
+                        ),
+                    )
+
+                    // Draw active thumb knob at the playhead
+                    drawCircle(
+                        color = activeColor,
+                        radius = (trackStroke * 0.75f).coerceAtLeast(4.dp.toPx()),
+                        center = Offset(filled, centerY),
+                    )
+                } else {
+                    // Smooth flat active track
+                    drawRoundRect(
+                        color = activeColor,
+                        topLeft = Offset(0f, centerY - trackStroke / 2f),
+                        size = Size(filled.coerceAtLeast(trackStroke), trackStroke),
+                        cornerRadius = radius,
+                    )
+                }
             }
         }
-        // Composed only while mixing, rather than drawn conditionally inside the
-        // Canvas above: an infinite transition keeps requesting frames for as
-        // long as it exists, so the cheap way to stop it costing anything is for
-        // it not to exist. AnimatedVisibility keeps it alive through the exit
-        // fade, so the sheen dies away with the transition instead of vanishing
-        // on the frame the mix ends.
+
         AnimatedVisibility(
             visible = mixing,
             enter = fadeIn(tween(durationMillis = 420)),
@@ -157,23 +227,6 @@ fun ThinSlider(
     }
 }
 
-/**
- * A single soft highlight travelling the length of the bar, over and over,
- * while two tracks are being mixed.
- *
- * Drawn as a moving gradient rather than an opacity pulse because a pulse reads
- * as "loading" — the thing every shimmer in every app means — and this is the
- * opposite claim: not that the app is waiting, but that it is doing something.
- * Motion along the bar also points the same way the music is going.
- *
- * Sweeps the **whole** bar rather than the played portion, which the first
- * version did and which made it invisible twice over. A transition happens in
- * the opening seconds of the incoming track, so the played portion is then a
- * few percent of the width — a highlight travelling across that is a flicker at
- * the far left. And the played portion is already white at 0.92 alpha, so white
- * at 0.55 over it resolves to 0.96: the same hue, four percent brighter. The
- * unplayed track sits at 0.26, and that is where a white band actually reads.
- */
 @Composable
 private fun MixSheen(height: Dp) {
     val transition = rememberInfiniteTransition(label = "mixSheen")
@@ -181,8 +234,6 @@ private fun MixSheen(height: Dp) {
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            // Long enough to read as a sweep rather than a flicker, and slow
-            // enough not to compete with the music for attention.
             animation = tween(durationMillis = 500, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
@@ -194,8 +245,6 @@ private fun MixSheen(height: Dp) {
             .height(height),
     ) {
         val band = size.width * BAND_FRACTION
-        // Travels from fully off the left edge to fully off the right, so the
-        // highlight enters and leaves rather than materialising mid-bar.
         val centre = -band + (size.width + band * 2f) * phase
         drawRoundRect(
             brush = Brush.linearGradient(
@@ -212,5 +261,4 @@ private fun MixSheen(height: Dp) {
     }
 }
 
-/** Width of the travelling highlight, as a fraction of the whole bar. */
 private const val BAND_FRACTION = 0.7f

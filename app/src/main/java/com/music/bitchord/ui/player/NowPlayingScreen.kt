@@ -1023,7 +1023,7 @@ fun NowPlayingScreen(
         // every skip, then rests. Position ticks recompose this screen twice a
         // second and must not drag a full-screen blur along with them, which is
         // why the palette is passed as one immutable value.
-        MeshGradientBackground(palette = meshColors, trackKey = song.videoId)
+        MeshGradientBackground(palette = meshColors, trackKey = song.videoId, continuous = true)
 
         // The artwork, edge to edge and running up behind the status bar,
         // dissolving into the backdrop where the sleeve's bottom edge would
@@ -1826,6 +1826,8 @@ fun NowPlayingScreen(
             val transitionWindow by AppSettings.smartTransitionWindow.collectAsStateWithLifecycle()
             ThinSlider(
                 value = shown,
+                isPlaying = isPlaying,
+                squiggly = true,
                 onValueChange = {
                     val oldStep = (scrubValue * 50).toInt()
                     val newStep = (it * 50).toInt()
@@ -2055,6 +2057,8 @@ fun NowPlayingScreen(
                     Spacer(Modifier.width(10.dp))
                     ThinSlider(
                         value = volume.value,
+                        isPlaying = isPlaying,
+                        squiggly = true,
                         onValueChange = {
                             if ((it <= 0.02f && volume.value > 0.02f) || (it >= 0.98f && volume.value < 0.98f)) {
                                 haptics.play(Haptic.Detent)

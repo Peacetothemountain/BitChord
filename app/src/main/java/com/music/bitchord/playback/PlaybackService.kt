@@ -848,6 +848,7 @@ class PlaybackService : MediaSessionService() {
         )
 
         AppSettings.audioSessionId.value = exoPlayer.audioSessionId
+        AudioEffectsManager.attachSession(sessionId, applicationContext)
         applySettings(exoPlayer)
         applySettings(sparePlayer)
         observeSettings()
@@ -3323,6 +3324,7 @@ class PlaybackService : MediaSessionService() {
         // is not a reason to leave either behind.
         spare?.release()
         spare = null
+        AudioEffectsManager.release()
         super.onDestroy()
     }
 

@@ -87,7 +87,7 @@ fun MeshGradientBackground(
      * makes the card feel like an object rather than a picture of one, and
      * "reduce animation" still stops it dead.
      */
-    continuous: Boolean = false,
+    continuous: Boolean = true,
     /**
      * How far the blobs are smeared. The default is sized for a full screen;
      * a small surface needs proportionally less, or the four colours blend into
