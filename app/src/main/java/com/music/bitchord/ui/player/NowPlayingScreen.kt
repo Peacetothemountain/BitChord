@@ -2873,7 +2873,7 @@ private fun CurrentLyricLine(
     val text = when {
         intro -> introLine
         instrumental -> INSTRUMENTAL_MARK
-        else -> current!!.text
+        else -> current.text
     }
 
     Row(

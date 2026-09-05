@@ -42,3 +42,5 @@ target_compile_options(bitchord_analysis PRIVATE -O3 -fvisibility=hidden)
 
 find_library(log-lib log)
 target_link_libraries(bitchord_analysis ${log-lib})
+
+target_link_options(bitchord_analysis PRIVATE "-Wl,-z,max-page-size=16384")

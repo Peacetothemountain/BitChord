@@ -9,8 +9,8 @@ import androidx.security.crypto.MasterKey
 /**
  * Encrypted-at-rest storage for credentials.
  *
- * Two live here: the YouTube Music session cookie, and — if the user turns on
- * the Discord integration — that account's own bearer token. Neither is a
+ * Two live here: the YouTube Music session cookie, and - if the user turns on
+ * the Discord integration - that account's own bearer token. Neither is a
  * password: the Google one is typed into accounts.google.com inside a WebView,
  * and the Discord one is read out of a completed login session. But both grant
  * full access to their account, so they don't go in the plain prefs the
@@ -22,15 +22,11 @@ import androidx.security.crypto.MasterKey
 class AuthStore(context: Context) {
 
     private val prefs: SharedPreferences = runCatching {
-        EncryptedSharedPreferences.create(
-            context,
-            "bitchord_auth",
-            MasterKey.Builder(context)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build(),
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
+        createEncryptedPrefs(context)
+    }.recoverCatching { error ->
+        Log.w("BitChord", "EncryptedSharedPreferences failed, self-healing corrupted keyset: ${error.message}")
+        context.deleteSharedPreferences("bitchord_auth")
+        createEncryptedPrefs(context)
     }.getOrElse {
         Log.w("BitChord", "EncryptedSharedPreferences unavailable, falling back: ${it.message}")
         context.getSharedPreferences("bitchord_auth_plain", Context.MODE_PRIVATE)
@@ -48,19 +44,40 @@ class AuthStore(context: Context) {
         get() = prefs.getString(KEY_DISCORD_TOKEN, null)
         set(value) = prefs.edit().putString(KEY_DISCORD_TOKEN, value).apply()
 
+    val isDiscordSignedIn: Boolean
+        get() = !discordToken.isNullOrEmpty()
+
+    fun clearDiscordToken() {
+        prefs.edit().remove(KEY_DISCORD_TOKEN).apply()
+    }
+
     /**
-     * Signs out of YouTube Music only — the Discord login is a separate account.
+     * Signs out of YouTube Music. Keeps the Discord token intact: the two
+     * accounts are distinct and connecting Discord does not depend on being
+     * signed into Google.
      */
     fun signOut() = prefs.edit().remove(KEY_COOKIE).apply()
 
     companion object {
+        private fun createEncryptedPrefs(context: Context): SharedPreferences {
+            return EncryptedSharedPreferences.create(
+                context,
+                "bitchord_auth",
+                MasterKey.Builder(context)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build(),
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+        }
+
         /**
          * Whether a cookie header carries a secret Innertube requests can be
          * signed with.
          *
          * Matched on the cookie *name*, which reads as pedantry and is not. The
          * test used to be `cookie.contains("SAPISID")`, and `__Secure-3PAPISID`
-         * contains "SAPISID" — so a jar holding only the `__Secure-` forms, which
+         * contains "SAPISID" - so a jar holding only the `__Secure-` forms, which
          * is what a partitioned-cookie login produces, passed a check for a
          * cookie it did not have. The app then declared itself signed in and made
          * every request unsigned, which Google answers as a stranger. Library

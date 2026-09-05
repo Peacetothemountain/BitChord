@@ -42,14 +42,14 @@ val lastfmSecret: String = (
 
 android {
     namespace = "com.music.bitchord"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.music.bitchord"
         // 26 keeps reach wide; real-time blur (RenderEffect) kicks in on API 31+,
         // Haze falls back to a translucent scrim below that.
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 10
         versionName = "1.5"
 
@@ -66,6 +66,11 @@ android {
         // already postdates the 64-bit requirement, so a 32-bit slice would
         // double the native payload for devices that do not exist in the
         // install base.
+        externalNativeBuild {
+            cmake {
+                arguments += listOf("-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON")
+            }
+        }
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
