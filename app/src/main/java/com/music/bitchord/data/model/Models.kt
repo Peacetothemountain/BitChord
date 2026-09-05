@@ -162,6 +162,27 @@ data class Account(
     val thumbnailUrl: String?,
 )
 
+/**
+ * A channel under a Google login, as Innertube's switcher lists them.
+ *
+ * Can be the account's own channel (where [pageId] is null) or a brand
+ * channel owned by it (where [pageId] is the brand's numeric identity).
+ * Either way [dataSyncId] identifies the channel on the request context, and
+ * sending one that belongs to a different Google account is answered with 401.
+ */
+data class AccountChannel(
+    val name: String,
+    val subtitle: String,
+    val thumbnailUrl: String?,
+    val pageId: String?,
+    val dataSyncId: String?,
+    /** Whether YouTube's own switcher marks this as the session's active one. */
+    val activeOnWeb: Boolean,
+) {
+    /** Identity of the selection, stable across refetches of the list. */
+    val key: String get() = pageId ?: dataSyncId ?: name
+}
+
 data class HomeShelf(
     val title: String,
     val items: List<ShelfItem>,
