@@ -38,46 +38,11 @@ enum class AudioQuality(
     LOSSLESS(Int.MAX_VALUE, "Lossless", "Your addons + JioSaavn, bit-exact where available", "300+ MB/hr"),
     ;
 
-    /**
-     * Whether a stream started under this ceiling may be served by [kind].
-     *
-     * Asked per stream rather than written into
-     * [SourceConfig.enabled][com.music.bitchord.data.sources.SourceConfig.enabled],
-     * which is what this used to do — an `applyQualityPreset` call flipped the
-     * module and JioSaavn switches the moment a rung was picked. Two things
-     * were wrong with that and both were reported together: picking a rung for
-     * *mobile data* turned the sources off while sitting on Wi-Fi, and nothing
-     * turned them back on when the connection changed, so a Wi-Fi ceiling of
-     * Lossless still had no lossless source to reach. A ceiling is a property
-     * of the connection in force; the switches on the Sources screen are the
-     * user's standing choice. Storing the first in the second lost the second.
-     *
-     * [SourceKind.YOUTUBE] is permitted on every rung: it is what [maxKbps]
-     * caps, and it is the only source that can answer at all when the ones
-     * above it are skipped.
-     */
-    fun permits(kind: SourceKind): Boolean = when (this) {
+    fun permits(kind: com.music.bitchord.data.sources.SourceKind): Boolean = when (this) {
         LOSSLESS -> true
-        // No lossless answer is wanted here, and a source that can serve one is
-        // the slow half of the list: an addon fronting several catalogues walks
-        // all of them before it answers, which is seconds spent to land on a
-        // transcode JioSaavn already has at 320.
         HIGH -> !kind.canServeLossless
-        MEDIUM, LOW -> kind == SourceKind.YOUTUBE
+        MEDIUM, LOW -> kind == com.music.bitchord.data.sources.SourceKind.YOUTUBE
     }
-}
-
-/**
- * PCM format requested from Media3's AudioTrack sink.
- *
- * FLOAT_32 is not a cosmetic "hi-res" switch: it makes Media3 convert
- * high-resolution integer PCM to IEEE-754 float and configure AudioTrack for
- * PCM_FLOAT. Android may still route/resample it according to the selected
- * output device, which is why the player exposes the negotiated format.
- */
-enum class OutputPcmMode(val label: String) {
-    PCM_16("16-bit PCM"),
-    FLOAT_32("32-bit float"),
 }
 
 /**
@@ -374,18 +339,14 @@ object AppSettings {
      * Puts v1.5's backdrop back on the player: four quantised blobs drifting
      * behind the whole screen, rather than the artwork's own colours hung off
      * the sleeve's bottom edge.
-     *
-     * Off by default, because the current backdrop replaced it for two reasons
-     * that have not gone away — see [ArtworkMesh][com.music.bitchord.ui.player.ArtworkMesh]
-     * for the colour one (a cover that is nine-tenths black with a red stripe
-     * comes back from the quantiser as a red screen) and
-     * [ArtworkMeshBackdrop][com.music.bitchord.ui.player.ArtworkMeshBackdrop]
-     * for the cost one (blobs that drift are a full-screen blur redrawn while
-     * they move, where a mesh is drawn once per track and then composited).
-     * Kept as a switch because people asked for the old look back, and neither
-     * reason is one a listener has to agree with.
      */
     val legacyMeshGradient = MutableStateFlow(false)
+
+    /**
+     * Whether Dolby Atmos tracks are eligible to be requested from sources that
+     * can provide them.
+     */
+    val dolbyAtmos = MutableStateFlow(true)
 
     /**
      * Time-synced lyrics on the player, lit up as they are sung.
@@ -660,6 +621,7 @@ object AppSettings {
         canvasOverCellular.value = prefs.getBoolean(KEY_CANVAS_OVER_CELLULAR, false)
         fullBleedArtwork.value = prefs.getBoolean(KEY_FULL_BLEED_ARTWORK, true)
         legacyMeshGradient.value = prefs.getBoolean(KEY_LEGACY_MESH_GRADIENT, false)
+        dolbyAtmos.value = prefs.getBoolean(KEY_DOLBY_ATMOS, true)
         syncedLyrics.value = prefs.getBoolean(KEY_SYNCED_LYRICS, true)
         lyricsSources.value = readLyricsSources()
         lyricsSourceOrder.value = readLyricsSourceOrder()
@@ -1037,6 +999,11 @@ object AppSettings {
     fun setLegacyMeshGradient(value: Boolean) {
         legacyMeshGradient.value = value
         prefs.edit().putBoolean(KEY_LEGACY_MESH_GRADIENT, value).apply()
+    }
+
+    fun setDolbyAtmos(value: Boolean) {
+        dolbyAtmos.value = value
+        prefs.edit().putBoolean(KEY_DOLBY_ATMOS, value).apply()
     }
 
     /** Clamped to [DEFAULT_CACHE_LIMIT_BYTES]..[MAX_CACHE_LIMIT_BYTES] — the floor is the default, not zero. */
@@ -1428,6 +1395,7 @@ object AppSettings {
     private const val KEY_CANVAS_OVER_CELLULAR = "canvas_over_cellular"
     private const val KEY_FULL_BLEED_ARTWORK = "full_bleed_artwork"
     private const val KEY_LEGACY_MESH_GRADIENT = "legacy_mesh_gradient"
+    private const val KEY_DOLBY_ATMOS = "dolby_atmos"
     private const val KEY_SYNCED_LYRICS = "synced_lyrics"
     private const val KEY_LYRICS_SOURCES = "lyrics_sources"
     private const val KEY_LYRICS_SOURCE_ORDER = "lyrics_source_order"

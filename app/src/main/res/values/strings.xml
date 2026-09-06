@@ -704,4 +704,6 @@
     <string name="use_this_profile">Use this profile</string>
     <string name="switch_profile_hint">Switch using the avatar, then use this profile.</string>
     <string name="profile_unavailable">No signed-in profile is available on this page yet.</string>
+    <string name="video_audio_conversion">Stop converting video songs to audio version</string>
+    <string name="video_audio_conversion_subtitle">Plays a music-video upload as itself instead of swapping it for its catalogue audio release</string>
 </resources>
