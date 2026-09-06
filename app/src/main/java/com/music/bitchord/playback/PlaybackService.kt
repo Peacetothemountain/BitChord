@@ -1125,6 +1125,7 @@ class PlaybackService : MediaLibraryService() {
         applyOutputRoute()
 
         AppSettings.audioSessionId.value = exoPlayer.audioSessionId
+        AudioEffectsManager.attachSession(exoPlayer.audioSessionId, applicationContext)
         applySettings(exoPlayer)
         applySettings(sparePlayer)
         observeSettings()
@@ -4262,6 +4263,7 @@ class PlaybackService : MediaLibraryService() {
         // is not a reason to leave either behind.
         spare?.release()
         spare = null
+        AudioEffectsManager.release()
         super.onDestroy()
     }
 

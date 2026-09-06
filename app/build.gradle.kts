@@ -43,7 +43,7 @@ android {
         // 26 keeps reach wide; real-time blur (RenderEffect) kicks in on API 31+,
         // Haze falls back to a translucent scrim below that.
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 14
         versionName = "1.5.2"
 
@@ -78,7 +78,7 @@ android {
         create("dev") {
             dimension = "env"
             applicationId = "com.dev.bitchord"
-            resValue("string", "app_name", "BitChord Dev")
+            resValue("string", "app_name", "BitChord")
         }
         create("prod") {
             dimension = "env"

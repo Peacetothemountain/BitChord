@@ -1137,6 +1137,7 @@ fun NowPlayingScreen(
             MeshGradientBackground(
                 palette = rememberArtworkColors(song.thumbnailUrl, canvasFrame),
                 trackKey = song.videoId,
+                continuous = true,
             )
         } else {
             ArtworkMeshBackdrop(
@@ -2080,6 +2081,8 @@ fun NowPlayingScreen(
             val transitionWindow by AppSettings.smartTransitionWindow.collectAsStateWithLifecycle()
             ThinSlider(
                 value = shown,
+                isPlaying = isPlaying,
+                squiggly = true,
                 onValueChange = {
                     scrubbing = true
                     scrubValue = it
@@ -2329,6 +2332,8 @@ fun NowPlayingScreen(
                     Spacer(Modifier.width(10.dp))
                     ThinSlider(
                         value = volume.value,
+                        isPlaying = isPlaying,
+                        squiggly = true,
                         onValueChange = {
                             volumeDragging = true
                             // Follow the finger exactly; only external changes tween.
