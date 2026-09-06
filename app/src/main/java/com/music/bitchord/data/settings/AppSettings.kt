@@ -23,8 +23,16 @@ enum class AudioQuality(
     val hourly: String,
 ) {
     LOW(64, "Low", "~64 kbps · smallest download", "29 MB/hr"),
-    MEDIUM(128, "Medium", "~128 kbps · balanced", "58 MB/hr"),
-    HIGH(Int.MAX_VALUE, "High", "Best available · ~171 kbps Opus", "77 MB/hr"),
+    MEDIUM(Int.MAX_VALUE, "Medium", "Best available · ~171 kbps Opus", "77 MB/hr"),
+    HIGH(Int.MAX_VALUE, "High", "JioSaavn up to 320kbps, YouTube fallback", "144 MB/hr"),
+    LOSSLESS(Int.MAX_VALUE, "Lossless", "Your addons + JioSaavn, bit-exact where available", "300+ MB/hr"),
+    ;
+
+    fun permits(kind: com.music.bitchord.data.sources.SourceKind): Boolean = when (this) {
+        LOSSLESS -> true
+        HIGH -> !kind.canServeLossless
+        MEDIUM, LOW -> kind == com.music.bitchord.data.sources.SourceKind.YOUTUBE
+    }
 }
 
 /**
@@ -231,6 +239,19 @@ object AppSettings {
      * [NowPlayingScreen][com.music.bitchord.ui.player.NowPlayingScreen].
      */
     val fullBleedArtwork = MutableStateFlow(true)
+
+    /**
+     * Puts v1.5's backdrop back on the player: four quantised blobs drifting
+     * behind the whole screen, rather than the artwork's own colours hung off
+     * the sleeve's bottom edge.
+     */
+    val legacyMeshGradient = MutableStateFlow(false)
+
+    /**
+     * Whether Dolby Atmos tracks are eligible to be requested from sources that
+     * can provide them.
+     */
+    val dolbyAtmos = MutableStateFlow(true)
 
     /**
      * Time-synced lyrics on the player, lit up as they are sung.
@@ -462,6 +483,8 @@ object AppSettings {
         animatedCanvas.value = prefs.getBoolean(KEY_ANIMATED_CANVAS, true)
         canvasOverCellular.value = prefs.getBoolean(KEY_CANVAS_OVER_CELLULAR, false)
         fullBleedArtwork.value = prefs.getBoolean(KEY_FULL_BLEED_ARTWORK, true)
+        legacyMeshGradient.value = prefs.getBoolean(KEY_LEGACY_MESH_GRADIENT, false)
+        dolbyAtmos.value = prefs.getBoolean(KEY_DOLBY_ATMOS, true)
         syncedLyrics.value = prefs.getBoolean(KEY_SYNCED_LYRICS, true)
         lyricsSources.value = readLyricsSources()
         lyricsSourceOrder.value = readLyricsSourceOrder()
@@ -767,6 +790,16 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_FULL_BLEED_ARTWORK, value).apply()
     }
 
+    fun setLegacyMeshGradient(value: Boolean) {
+        legacyMeshGradient.value = value
+        prefs.edit().putBoolean(KEY_LEGACY_MESH_GRADIENT, value).apply()
+    }
+
+    fun setDolbyAtmos(value: Boolean) {
+        dolbyAtmos.value = value
+        prefs.edit().putBoolean(KEY_DOLBY_ATMOS, value).apply()
+    }
+
     /** Clamped to [DEFAULT_CACHE_LIMIT_BYTES]..[MAX_CACHE_LIMIT_BYTES] — the floor is the default, not zero. */
     fun setAudioCacheLimitBytes(value: Long) {
         val clamped = value.coerceIn(DEFAULT_CACHE_LIMIT_BYTES, MAX_CACHE_LIMIT_BYTES)
@@ -1068,6 +1101,8 @@ object AppSettings {
     private const val KEY_ANIMATED_CANVAS = "animated_canvas"
     private const val KEY_CANVAS_OVER_CELLULAR = "canvas_over_cellular"
     private const val KEY_FULL_BLEED_ARTWORK = "full_bleed_artwork"
+    private const val KEY_LEGACY_MESH_GRADIENT = "legacy_mesh_gradient"
+    private const val KEY_DOLBY_ATMOS = "dolby_atmos"
     private const val KEY_SYNCED_LYRICS = "synced_lyrics"
     private const val KEY_LYRICS_SOURCES = "lyrics_sources"
     private const val KEY_LYRICS_SOURCE_ORDER = "lyrics_source_order"
