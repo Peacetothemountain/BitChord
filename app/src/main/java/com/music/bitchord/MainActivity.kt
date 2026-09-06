@@ -210,6 +210,8 @@ import com.music.bitchord.ui.theme.rememberArtworkPalette
 import com.music.bitchord.ui.theme.SystemBarIcons
 import com.music.bitchord.ui.utils.rememberIosOverscrollFactory
 import com.music.bitchord.ui.performance.resolvePerformanceRefreshRate
+import com.music.bitchord.ui.player.MeshGradientBackground
+import com.music.bitchord.ui.player.rememberArtworkColors
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.launch
@@ -1642,6 +1644,22 @@ private fun BitChordApp(
         // one child it always had and changes nothing.
         Row(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f).fillMaxHeight()) {
+                val animatedBg by AppSettings.legacyMeshGradient.collectAsStateWithLifecycle()
+                if (animatedBg) {
+                    val appPalette = rememberArtworkColors(
+                        imageUrl = player.song?.thumbnailUrl,
+                    )
+                    MeshGradientBackground(
+                        palette = appPalette,
+                        trackKey = player.song?.videoId ?: "app_idle",
+                        continuous = true,
+                        blurRadius = 64.dp,
+                        modifier = Modifier
+                            .matchParentSize()
+                            .hazeSource(hazeState),
+                    )
+                }
+
                 AnimatedContent(
                     targetState = when {
                         showDiscord -> "discord"
@@ -2349,7 +2367,11 @@ private fun BitChordApp(
                     // Not the wash: by the foot of the screen the page has finished
                     // easing out of it and into this, so this is what is actually
                     // under the tab bar.
-                    pageColor = if (isDetailVisible) detailPalette.background else MaterialTheme.colorScheme.background,
+                    pageColor = when {
+                        animatedBg -> MaterialTheme.colorScheme.background.copy(alpha = 0.35f)
+                        isDetailVisible -> detailPalette.background
+                        else -> MaterialTheme.colorScheme.background
+                    },
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
 

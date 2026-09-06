@@ -2,14 +2,18 @@ package com.music.bitchord.ui.player
 
 import android.graphics.Bitmap
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -40,7 +44,6 @@ import coil3.request.allowHardware
 import coil3.toBitmap
 import com.music.bitchord.data.settings.AppSettings
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlin.math.PI
 import kotlin.math.abs
@@ -49,10 +52,10 @@ import kotlin.math.min
 import kotlin.math.sin
 
 private val MaterialYouGrayishFallbacks = listOf(
-    Color(0xFF1C1E22),
-    Color(0xFF23262D),
-    Color(0xFF181A1E),
-    Color(0xFF2B2E37),
+    Color(0xFF282C34),
+    Color(0xFF23272F),
+    Color(0xFF2A2D36),
+    Color(0xFF1F2228),
 )
 
 /** The four mesh colours, wrapped so the backdrop can skip recomposition. */
@@ -70,7 +73,7 @@ fun MeshGradientBackground(
     palette: MeshPalette,
     modifier: Modifier = Modifier,
     trackKey: Any? = null,
-    driftMillis: Int = 10_000,
+    driftMillis: Int = 12_000,
     /**
      * Keep the blobs orbiting continuously with subtle ambient motion like YouTube Music.
      */
@@ -78,7 +81,7 @@ fun MeshGradientBackground(
     /**
      * How far the blobs are smeared.
      */
-    blurRadius: Dp = 72.dp,
+    blurRadius: Dp = 56.dp,
     animated: Boolean = true,
 ) {
     val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
@@ -107,69 +110,48 @@ fun MeshGradientBackground(
     }
     val baseColor by animateColorAsState(scheme.surfaceContainerLowest, colorSpec, label = "meshBase")
 
-    // Read in the draw lambda, not here: an Animatable read during draw
-    // invalidates only the drawing, leaving composition out of the loop.
-    val phase = remember { Animatable(0f) }
-    LaunchedEffect(trackKey, reduceAnimation, continuous, animated) {
-        when {
-            !animated || reduceAnimation -> phase.snapTo(0f)
-            continuous -> while (isActive) {
-                phase.animateTo(
-                    targetValue = phase.value + (2 * PI).toFloat(),
-                    animationSpec = tween(driftMillis * 4, easing = LinearEasing),
-                )
-            }
-            else -> phase.animateTo(
-                targetValue = phase.value + DRIFT_RADIANS,
-                animationSpec = tween(driftMillis, easing = FastOutSlowInEasing),
-            )
-        }
-    }
+    // Smooth, reliable continuous ambient drift driven by rememberInfiniteTransition
+    val infiniteTransition = rememberInfiniteTransition(label = "meshDrift")
+    val rawDrift by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = driftMillis, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "driftPhase",
+    )
+    val drift = if (reduceAnimation || !animated || !continuous) 0f else rawDrift
 
-    // Scale up slightly so the blur's clamped edges never show, then blur the
-    // whole layer (RenderEffect, API 31+; a no-op below — the radial falloff
-    // already reads soft there).
-    //
-    // Clipped on the way out, and from a layer of its own rather than by setting
-    // `clip` on the one below: that one clips what is drawn *into* it, in its own
-    // coordinates, and the scale is applied after — so the overhang the scale
-    // creates survives it. This has to sit outside the scale to contain it.
-    //
-    // The overhang is a third of the backdrop's width and it is painted, not
-    // transparent: whatever this is standing in gets it. Off a full-window sheet
-    // that is the far side of the window and nobody ever saw it, which is how it
-    // went unnoticed; in a pane beside a page it was a hand's width of gradient
-    // laid over the feed.
-    Canvas(
-        modifier = modifier
-            .fillMaxSize()
-            .clipToBounds()
-            .graphicsLayer {
-                scaleX = 1.3f
-                scaleY = 1.3f
-            }
-            .background(baseColor)
-            .blur(blurRadius),
-    ) {
-        val anchors = listOf(
-            Offset(0.20f, 0.25f),
-            Offset(0.80f, 0.20f),
-            Offset(0.75f, 0.80f),
-            Offset(0.25f, 0.75f),
-        )
-        val speeds = listOf(1f, -0.7f, 0.85f, -1.15f)
-        val drift = phase.value
+    Box(modifier = modifier.clipToBounds()) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = 1.35f
+                    scaleY = 1.35f
+                }
+                .background(baseColor)
+                .blur(blurRadius),
+        ) {
+            val anchors = listOf(
+                Offset(0.20f, 0.25f),
+                Offset(0.80f, 0.22f),
+                Offset(0.75f, 0.78f),
+                Offset(0.22f, 0.75f),
+            )
+            val speeds = listOf(1f, -0.75f, 0.85f, -1.1f)
 
         animatedColors.forEachIndexed { index, color ->
             val anchor = anchors[index]
             val center = Offset(
-                x = (anchor.x + 0.16f * cos(drift * speeds[index] + index * 1.7f)) * size.width,
-                y = (anchor.y + 0.16f * sin(drift * speeds[index] * 0.9f + index * 2.3f)) * size.height,
+                x = (anchor.x + 0.20f * cos(drift * speeds[index] + index * 1.7f)) * size.width,
+                y = (anchor.y + 0.20f * sin(drift * speeds[index] * 0.9f + index * 2.3f)) * size.height,
             )
-            val radius = size.maxDimension * 0.62f
+            val radius = size.maxDimension * 0.70f
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(color.copy(alpha = 0.85f), color.copy(alpha = 0f)),
+                    colors = listOf(color.copy(alpha = 0.92f), color.copy(alpha = 0f)),
                     center = center,
                     radius = radius,
                 ),
@@ -178,16 +160,17 @@ fun MeshGradientBackground(
             )
         }
 
-        // Gentle scrim so white text stays legible over bright art.
+        // Gentle scrim so white text and controls stay crisp and legible
         drawRect(
             brush = Brush.verticalGradient(
                 colors = listOf(
-                    Color.Black.copy(alpha = 0.10f),
-                    Color.Black.copy(alpha = 0.38f),
+                    Color.Black.copy(alpha = 0.04f),
+                    Color.Black.copy(alpha = 0.18f),
                 ),
             ),
         )
     }
+}
 }
 
 /**
@@ -308,15 +291,25 @@ private fun Color.hsl(): FloatArray =
 /**
  * Tunes the sampled artwork color into a moody, dark, grayish ambient tone
  * reminiscent of YouTube Music's ambient player mode and Material You Monet palette.
- * Desaturates colors to subtle slate/gray levels (8% - 24% saturation), sets dark
- * moody luminance (12% - 20% lightness), and blends 40% with the active Monet surface color.
+ * Keeps saturation in a subtle grayish-slate band (12% - 30% saturation),
+ * sets a soft luminous ambient lightness (26% - 38% lightness), and blends
+ * 35% with the active Material You Monet surface color.
  */
 private fun Color.toMaterialYouGrayish(monetSurface: Color): Color {
     val hsl = FloatArray(3)
     ColorUtils.colorToHSL(toArgb(), hsl)
-    hsl[1] = (hsl[1] * 0.28f).coerceIn(0.08f, 0.24f)
-    hsl[2] = hsl[2].coerceIn(0.12f, 0.20f)
+    val isMonetDark = ColorUtils.calculateLuminance(monetSurface.toArgb()) < 0.5f
+    // Gentle grayish ambient tone with subtle color character (14% - 30% saturation)
+    hsl[1] = (hsl[1] * 0.38f).coerceIn(0.14f, 0.30f)
+    if (isMonetDark) {
+        // Soft luminous ambient lightness against dark base (28% - 40% lightness)
+        hsl[2] = hsl[2].coerceIn(0.28f, 0.40f)
+    } else {
+        // In light theme, keep it soft and subtle (82% - 94% lightness)
+        hsl[2] = hsl[2].coerceIn(0.82f, 0.94f)
+    }
     val desaturated = Color(ColorUtils.HSLToColor(hsl))
-    val blended = ColorUtils.blendARGB(desaturated.toArgb(), monetSurface.toArgb(), 0.40f)
+    // Blend with the system Monet surface container
+    val blended = ColorUtils.blendARGB(desaturated.toArgb(), monetSurface.toArgb(), 0.30f)
     return Color(blended)
 }
