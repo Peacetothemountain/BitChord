@@ -1,5 +1,7 @@
 package com.music.bitchord.ui.components
 
+import com.music.bitchord.R
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -30,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -44,7 +47,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.bitchord.data.settings.AppSettings
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
 
@@ -70,13 +72,13 @@ fun ListenBrainzTokenAlert(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = "ListenBrainz Token",
+                text = stringResource(R.string.listenbrainz_token),
                 style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp, fontWeight = FontWeight.W600),
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center,
             )
             Text(
-                text = "Paste your ListenBrainz user token to enable scrobbling.",
+                text = stringResource(R.string.listenbrainz_token_description),
                 modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 17.sp),
                 color = MaterialTheme.colorScheme.onSurface,
@@ -85,15 +87,15 @@ fun ListenBrainzTokenAlert(
             AlertTextField(
                 value = tokenInput,
                 onValueChange = onTokenInputChange,
-                placeholder = "API Token",
+                placeholder = stringResource(R.string.api_token),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { onSave() }),
             )
         }
         AlertRule()
-        AlertAction(label = "Save", emphasised = true, onClick = onSave)
+        AlertAction(label = stringResource(R.string.save), emphasised = true, onClick = onSave)
         AlertRule()
-        AlertAction(label = "Cancel", emphasised = false, onClick = onDismiss)
+        AlertAction(label = stringResource(R.string.cancel), emphasised = false, onClick = onDismiss)
     }
 }
 
@@ -118,13 +120,13 @@ fun LastfmLoginAlert(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = "Last.fm Login",
+                text = stringResource(R.string.lastfm_login),
                 style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp, fontWeight = FontWeight.W600),
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center,
             )
             Text(
-                text = error ?: "Sign in with your Last.fm account to enable scrobbling.",
+                text = error ?: stringResource(R.string.lastfm_login_description),
                 modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 17.sp),
                 color = if (error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
@@ -133,7 +135,7 @@ fun LastfmLoginAlert(
             AlertTextField(
                 value = usernameInput,
                 onValueChange = onUsernameInputChange,
-                placeholder = "Username",
+                placeholder = stringResource(R.string.username),
                 enabled = !loading,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
             )
@@ -141,7 +143,7 @@ fun LastfmLoginAlert(
             AlertTextField(
                 value = passwordInput,
                 onValueChange = onPasswordInputChange,
-                placeholder = "Password",
+                placeholder = stringResource(R.string.password),
                 enabled = !loading,
                 isPassword = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
@@ -152,13 +154,18 @@ fun LastfmLoginAlert(
         }
         AlertRule()
         AlertAction(
-            label = if (loading) "Signing in..." else "Sign in",
+            label = if (loading) stringResource(R.string.signing_in) else stringResource(R.string.sign_in),
             emphasised = true,
             onClick = onSignIn,
             enabled = !loading && usernameInput.isNotBlank() && passwordInput.isNotBlank(),
         )
         AlertRule()
-        AlertAction(label = "Cancel", emphasised = false, onClick = onDismiss, enabled = !loading)
+        AlertAction(
+            label = stringResource(R.string.cancel),
+            emphasised = false,
+            onClick = onDismiss,
+            enabled = !loading,
+        )
     }
 }
 
@@ -189,15 +196,13 @@ fun DiscordTokenAlert(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = "Discord Token",
+                text = stringResource(R.string.discord_token),
                 style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp, fontWeight = FontWeight.W600),
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center,
             )
             Text(
-                text = error
-                    ?: "Paste your Discord account token. It stays on this device, " +
-                    "encrypted, and is only ever sent to Discord.",
+                text = error ?: stringResource(R.string.discord_token_description),
                 modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 17.sp),
                 color = if (error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
@@ -206,7 +211,7 @@ fun DiscordTokenAlert(
             AlertTextField(
                 value = tokenInput,
                 onValueChange = onTokenInputChange,
-                placeholder = "Token",
+                placeholder = stringResource(R.string.token),
                 enabled = !loading,
                 isPassword = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
@@ -215,13 +220,18 @@ fun DiscordTokenAlert(
         }
         AlertRule()
         AlertAction(
-            label = if (loading) "Checking..." else "Save",
+            label = if (loading) stringResource(R.string.checking) else stringResource(R.string.save),
             emphasised = true,
             onClick = onSave,
             enabled = !loading && tokenInput.isNotBlank(),
         )
         AlertRule()
-        AlertAction(label = "Cancel", emphasised = false, onClick = onDismiss, enabled = !loading)
+        AlertAction(
+            label = stringResource(R.string.cancel),
+            emphasised = false,
+            onClick = onDismiss,
+            enabled = !loading,
+        )
     }
 }
 
@@ -276,13 +286,133 @@ fun TextValueAlert(
             )
         }
         AlertRule()
-        AlertAction(label = "Save", emphasised = true, onClick = onSave, enabled = saveEnabled)
+        AlertAction(
+            label = stringResource(R.string.save),
+            emphasised = true,
+            onClick = onSave,
+            enabled = saveEnabled,
+        )
         if (onRemove != null) {
             AlertRule()
-            AlertAction(label = "Remove", emphasised = false, onClick = onRemove)
+            AlertAction(label = stringResource(R.string.remove), emphasised = false, onClick = onRemove)
         }
         AlertRule()
-        AlertAction(label = "Cancel", emphasised = false, onClick = onDismiss)
+        AlertAction(label = stringResource(R.string.cancel), emphasised = false, onClick = onDismiss)
+    }
+}
+
+/**
+ * Add or edit a source that has an address — the addon editor.
+ *
+ * The same frosted card every other alert in this app uses, rather than the
+ * Material `AlertDialog` this replaced. That one put a filled `OutlinedTextField`
+ * and a row of cramped text buttons in the middle of a screen where nothing
+ * else looks like that, and it read as a stock widget dropped into somebody
+ * else's design.
+ *
+ * One field and up to four stacked actions. There is deliberately no name
+ * field: an addon states its own name in its manifest, so asking the user to
+ * invent one is asking for information the addon is about to supply anyway —
+ * and a blank field would leave the row showing a bare hostname next to a
+ * perfectly good published name.
+ *
+ * [status] is the one thing here that no other alert in the file needs:
+ * testing an address has *three* outcomes rather than the usual two, and "it
+ * answered, but not with something this app can use" is the one worth reading
+ * — so a result replaces the description in place, coloured by [statusIsGood],
+ * the way [LastfmLoginAlert] surfaces a failed sign-in.
+ */
+@OptIn(ExperimentalHazeMaterialsApi::class)
+@Composable
+fun AddonEditorAlert(
+    hazeState: HazeState,
+    title: String,
+    description: String,
+    urlValue: String,
+    onUrlChange: (String) -> Unit,
+    urlPlaceholder: String,
+    /** What the last test said, or null before one has been run. */
+    status: String?,
+    statusIsGood: Boolean,
+    testing: Boolean,
+    /** Whether there is enough typed in to be worth testing or saving. */
+    canSubmit: Boolean,
+    onTest: () -> Unit,
+    onSave: () -> Unit,
+    /** Offered only for a source already stored — there is nothing to remove otherwise. */
+    onRemove: (() -> Unit)?,
+    onDismiss: () -> Unit,
+) {
+    AlertScaffold(hazeState = hazeState, onDismiss = { if (!testing) onDismiss() }) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 19.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp, fontWeight = FontWeight.W600),
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = status ?: description,
+                modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 17.sp),
+                color = when {
+                    status == null -> MaterialTheme.colorScheme.onSurface
+                    statusIsGood -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.error
+                },
+                textAlign = TextAlign.Center,
+            )
+            AlertTextField(
+                value = urlValue,
+                onValueChange = onUrlChange,
+                placeholder = urlPlaceholder,
+                enabled = !testing,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Uri,
+                    imeAction = ImeAction.Done,
+                ),
+                keyboardActions = KeyboardActions(onDone = { if (canSubmit && !testing) onSave() }),
+            )
+        }
+        AlertRule()
+        // Above Save rather than beside it: an address is worth checking before
+        // it is stored, and a row of three cramped buttons is what the Material
+        // dialog did badly.
+        AlertAction(
+            label = if (testing) stringResource(R.string.testing) else stringResource(R.string.test),
+            emphasised = false,
+            onClick = onTest,
+            enabled = canSubmit && !testing,
+        )
+        AlertRule()
+        AlertAction(
+            label = stringResource(R.string.save),
+            emphasised = true,
+            onClick = onSave,
+            enabled = canSubmit && !testing,
+        )
+        if (onRemove != null) {
+            AlertRule()
+            AlertAction(
+                label = stringResource(R.string.remove_source),
+                emphasised = false,
+                destructive = true,
+                onClick = onRemove,
+                enabled = !testing,
+            )
+        }
+        AlertRule()
+        AlertAction(
+            label = stringResource(R.string.cancel),
+            emphasised = false,
+            onClick = onDismiss,
+            enabled = !testing,
+        )
     }
 }
 
@@ -340,7 +470,7 @@ fun <T> ChoiceAlert(
             )
         }
         AlertRule()
-        AlertAction(label = "Cancel", emphasised = false, onClick = onDismiss)
+        AlertAction(label = stringResource(R.string.cancel), emphasised = false, onClick = onDismiss)
     }
 }
 
@@ -387,7 +517,7 @@ private fun ChoiceRow(
         if (checked) {
             Icon(
                 imageVector = Icons.Rounded.Check,
-                contentDescription = "Selected",
+                contentDescription = stringResource(R.string.selected),
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(19.dp),
             )
@@ -425,7 +555,10 @@ private fun AlertScaffold(
                     if (reduceDynamicBlur) {
                         Modifier.background(MaterialTheme.colorScheme.surface)
                     } else {
-                        Modifier.hazeEffect(state = hazeState, style = HazeMaterials.regular(MaterialTheme.colorScheme.surface))
+                        Modifier.optimizedHazeEffect(
+                            state = hazeState,
+                            style = HazeMaterials.regular(MaterialTheme.colorScheme.surface),
+                        )
                     },
                 )
                 .clickable(

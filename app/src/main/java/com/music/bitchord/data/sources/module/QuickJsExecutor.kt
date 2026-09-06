@@ -388,7 +388,7 @@ internal object QuickJsExecutor {
                     val body = args[3]?.toString()
                     val url = resolveUrl(rawUrl, fetchBase)
 
-                    TrackLog.d(TAG, "  → fetch $method $url")
+                    TrackLog.d(TAG, "  → fetch $method ${redactModuleUrl(url)}")
                     val (statusCode, responseBody) = fetchUrlSync(url, method, headersJson, body)
                     TrackLog.d(TAG, "    HTTP $statusCode (${responseBody.length} bytes)")
 
@@ -479,16 +479,6 @@ internal object QuickJsExecutor {
         headersJson: String,
         body: String?,
     ): Pair<Int, String> {
-        val parsedUri = android.net.Uri.parse(url)
-        val host = parsedUri.host?.lowercase(Locale.ROOT) ?: ""
-        val scheme = parsedUri.scheme?.lowercase(Locale.ROOT) ?: ""
-        if (scheme != "http" && scheme != "https") {
-            return Pair(400, "Blocked scheme: $scheme")
-        }
-        if (host == "localhost" || host == "127.0.0.1" || host.startsWith("192.168.") || host.startsWith("10.") || host.startsWith("172.16.") || host.endsWith(".local") || host.endsWith(".internal")) {
-            return Pair(403, "SSRF Protection: Access to local or private network is restricted")
-        }
-
         val builder = Request.Builder().url(url)
 
         var hasUserAgent = false

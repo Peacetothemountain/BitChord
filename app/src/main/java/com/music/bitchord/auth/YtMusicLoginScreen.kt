@@ -91,17 +91,6 @@ fun YtMusicLoginScreen(
             WebView(context).apply {
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
-                settings.databaseEnabled = true
-
-                // Modernize User-Agent to prevent Google "disallowed_useragent" /
-                // "This browser or app may not be secure" blocks on modern Android
-                val defaultUa = settings.userAgentString
-                val cleanUa = defaultUa.replace("; wv", "").replace(Regex("Version/\\d+\\.\\d+\\s*"), "")
-                settings.userAgentString = cleanUa
-
-                val cookieManager = CookieManager.getInstance()
-                cookieManager.setAcceptCookie(true)
-                cookieManager.setAcceptThirdPartyCookies(this, true)
 
                 webViewClient = object : WebViewClient() {
                     private var captured = false
@@ -122,19 +111,6 @@ fun YtMusicLoginScreen(
                 loadUrl(if (mode == WebSessionMode.SIGN_IN) LOGOUT_THEN_LOGIN_URL else "$MUSIC_ORIGIN/")
             }
         },
-    )
-}
-
-/** Legacy overload for backward compatibility with older composable invocations. */
-@Composable
-fun YtMusicLoginScreen(
-    onCookiesCaptured: (cookieHeader: String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    YtMusicLoginScreen(
-        mode = WebSessionMode.SIGN_IN,
-        onCaptured = { session -> onCookiesCaptured(session.cookie) },
-        modifier = modifier,
     )
 }
 

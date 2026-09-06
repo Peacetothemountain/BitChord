@@ -56,8 +56,6 @@ object LastPlayed {
      * Used at an explicit queue boundary, where restoring the queue from before
      * that boundary would be worse than the small cost of a synchronous write.
      */
-    fun save(songs: List<Song>, index: Int, positionMs: Long) = saveQueueImmediately(songs, index, positionMs)
-
     fun saveQueueImmediately(songs: List<Song>, index: Int, positionMs: Long) {
         if (songs.isEmpty()) {
             clearImmediately()

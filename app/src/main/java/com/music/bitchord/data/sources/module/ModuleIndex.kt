@@ -23,10 +23,8 @@ object ModuleIndex {
         return obj.entries
             .filter { it.key.startsWith("category:") && it.key !in excludedCategories }
             .flatMap { (_, value) ->
-                val arr = value as? kotlinx.serialization.json.JsonArray
-                arr?.mapNotNull { el ->
-                    runCatching { json.decodeFromJsonElement(SpineModule.serializer(), el) }.getOrNull()
-                } ?: emptyList()
+                runCatching { json.decodeFromJsonElement(listSerializer, value) }
+                    .getOrElse { emptyList() }
             }
             .distinctBy { it.id }
     }

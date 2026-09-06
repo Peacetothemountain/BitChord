@@ -22,11 +22,15 @@ import androidx.security.crypto.MasterKey
 class AuthStore(context: Context) {
 
     private val prefs: SharedPreferences = runCatching {
-        createEncryptedPrefs(context)
-    }.recoverCatching { error ->
-        Log.w("BitChord", "EncryptedSharedPreferences failed, self-healing corrupted keyset: ${error.message}")
-        context.deleteSharedPreferences("bitchord_auth")
-        createEncryptedPrefs(context)
+        EncryptedSharedPreferences.create(
+            context,
+            "bitchord_auth",
+            MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build(),
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
     }.getOrElse {
         Log.w("BitChord", "EncryptedSharedPreferences unavailable, falling back: ${it.message}")
         context.getSharedPreferences("bitchord_auth_plain", Context.MODE_PRIVATE)
@@ -105,13 +109,6 @@ class AuthStore(context: Context) {
         get() = prefs.getString(KEY_DISCORD_TOKEN, null)
         set(value) = prefs.edit().putString(KEY_DISCORD_TOKEN, value).apply()
 
-    val isDiscordSignedIn: Boolean
-        get() = !discordToken.isNullOrEmpty()
-
-    fun clearDiscordToken() {
-        prefs.edit().remove(KEY_DISCORD_TOKEN).apply()
-    }
-
     /**
      * The channel the listener chose to act as, if they chose one.
      *
@@ -188,18 +185,6 @@ class AuthStore(context: Context) {
     }
 
     companion object {
-        private fun createEncryptedPrefs(context: Context): SharedPreferences {
-            return EncryptedSharedPreferences.create(
-                context,
-                "bitchord_auth",
-                MasterKey.Builder(context)
-                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                    .build(),
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-            )
-        }
-
         /**
          * Whether a cookie header carries a secret Innertube requests can be
          * signed with.

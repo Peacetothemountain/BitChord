@@ -19,16 +19,10 @@ val signing = Properties().apply {
     if (file.exists()) file.inputStream().use { load(it) }
 }
 
-/**
- * Module index URL for lossless/HQ audio sourcing.
- * Set MODULE_INDEX_URL in local.properties to enable it.
- * If absent, the app builds fine — Settings will show a warning.
- */
 val localProps = Properties().apply {
     val file = rootProject.file("local.properties")
     if (file.exists()) file.inputStream().use { load(it) }
 }
-val moduleIndexUrl: String = localProps.getProperty("MODULE_INDEX_URL", "")
 val lastfmApiKey: String = (
     localProps.getProperty("LASTFM_API_KEY")
         ?: System.getenv("LASTFM_API_KEY")
@@ -42,7 +36,7 @@ val lastfmSecret: String = (
 
 android {
     namespace = "com.music.bitchord"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.music.bitchord"
@@ -50,29 +44,22 @@ android {
         // Haze falls back to a translucent scrim below that.
         minSdk = 26
         targetSdk = 37
-        versionCode = 10
-        versionName = "1.5"
+        versionCode = 14
+        versionName = "1.5.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        // Lossless/HQ module index URL — empty string if not configured.
-        buildConfigField("String", "MODULE_INDEX_URL", "\"${moduleIndexUrl}\"")
 
         // Last.fm credentials are supplied locally and never committed.
         buildConfigField("String", "LASTFM_API_KEY", "\"${lastfmApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
         buildConfigField("String", "LASTFM_SECRET", "\"${lastfmSecret.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
+    }
 
-        // Automix's DSP analyzer (native/analyzer). 64-bit only: minSdk 26
-        // already postdates the 64-bit requirement, so a 32-bit slice would
-        // double the native payload for devices that do not exist in the
-        // install base.
-        externalNativeBuild {
-            cmake {
-                arguments += listOf("-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON")
-            }
-        }
-        ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a", "x86_64")
+            isUniversalApk = true
         }
     }
 
@@ -205,6 +192,13 @@ dependencies {
     // ---- Compose (Material 3) ----
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
+    // Pinned above the BOM's 1.7.6: [IosOverscroll] uses OverscrollFactory,
+    // which that version doesn't have. Newer foundation alongside the BOM's
+    // older ui/material3 is a combination Compose supports deliberately —
+    // foundation depends on ui, not the reverse — and this exact pairing was
+    // already in effect (foundation was reaching 1.10.0 transitively through
+    // the liquid-glass library before that dependency was removed).
+    implementation("androidx.compose.foundation:foundation:1.10.0")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -226,6 +220,14 @@ dependencies {
     // Audio is progressive, but Apple serves its motion artwork as HLS — this
     // is what lets the animated sleeve play it. See CanvasArtworkPlayer.
     implementation("androidx.media3:media3-exoplayer-hls:1.11.0")
+    // Source modules hand back manifests rather than files, and which kind is
+    // the backend's choice, not ours: the Tidal one served `.m3u8` until
+    // September 2026 and `.mpd` after it, for the same track and the same
+    // request. Without this artifact a DASH manifest is not merely unplayed —
+    // DefaultMediaSourceFactory cannot build a source for it, falls back to
+    // progressive, and the extractors try to sniff XML as audio
+    // (ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED). See withResolvedStreamType.
+    implementation("androidx.media3:media3-exoplayer-dash:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.9.0")
 
     // ---- Images: Coil 3 + Palette (dominant colors for the mesh gradient) ----
@@ -287,6 +289,12 @@ dependencies {
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.0")
 
     testImplementation("junit:junit:4.13.2")
+    // A real HTTP server for the addon tests. The addon protocol is entirely
+    // "what does this app send, and what does it do with what comes back", and
+    // a hand-rolled fake of the client would be a test of the fake. Pinned to
+    // the OkHttp version already on the runtime classpath.
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
 }
