@@ -16,14 +16,18 @@ const val MAX_QUEUED_AUTOPLAY = 10
  * carry YouTube ids, so they are matched on YouTube before the radio request.
  */
 suspend fun youtubeSeedFor(song: Song): String? {
-    if (SourceRegistry.parseTrackKey(song.videoId) == null) return song.videoId
+    val isLocal = song.videoId.startsWith("content://") || song.videoId.startsWith("file://") || song.videoId.startsWith("local:")
+    val isModule = SourceRegistry.parseTrackKey(song.videoId) != null
+    if (!isLocal && !isModule) return song.videoId
+
     val target = TrackMatcher.targetOf(song)
-    val query = TrackMatcher.queries(target).firstOrNull() ?: return null
+    val query = TrackMatcher.queries(target).firstOrNull() ?: "${song.artist} ${song.title}".trim()
+    if (query.isBlank()) return null
     return YtMusicRepository.search(query, SearchFilter.SONGS)
         .getOrNull()
         ?.filterIsInstance<SearchResult.Track>()
         ?.map { it.song }
-        ?.let { TrackMatcher.best(it, target) }
+        ?.let { TrackMatcher.best(it, target) ?: it.firstOrNull() }
         ?.videoId
 }
 

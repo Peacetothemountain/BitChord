@@ -587,12 +587,13 @@ fun MediaController.playSongs(songs: List<Song>, startIndex: Int) {
     // played out of order — see [QueueShuffle]. The track the user picked still
     // leads, so it ends up at the top instead of at [startIndex].
     val shuffled = QueueShuffle.enabled.value
-    val queue = if (shuffled) {
-        QueueShuffle.startingOrder(songs, startIndex.coerceIn(songs.indices))
+    val validIndex = startIndex.coerceIn(songs.indices)
+    val (queue, playIndex) = if (shuffled) {
+        QueueShuffle.startingOrder(songs, validIndex) to 0
     } else {
-        queueStartingAt(songs, startIndex)
+        songs to validIndex
     }
-    setMediaItems(queue.map { it.toMediaItem() }, 0, 0L)
+    setMediaItems(queue.map { it.toMediaItem() }, playIndex, 0L)
     prepare()
     play()
 }

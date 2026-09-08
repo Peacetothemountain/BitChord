@@ -199,6 +199,12 @@ object AppSettings {
      */
     val exportDownloads = MutableStateFlow(false)
 
+    /** YouTube Music Smart Downloads (Offline Mixtape auto-downloading). */
+    val smartDownloads = MutableStateFlow(true)
+    val smartDownloadsQuota = MutableStateFlow(100)
+    val smartDownloadsOverMobile = MutableStateFlow(true)
+    private var appContext: Context? = null
+
     /** Whether the active network charges for data. `null` while offline. */
     val meteredConnection = MutableStateFlow<Boolean?>(null)
 
@@ -553,10 +559,13 @@ object AppSettings {
         get() = !wifiOnlyDownloads.value || meteredConnection.value != true
 
     fun init(context: Context) {
+        appContext = context.applicationContext
         prefs = context.getSharedPreferences("bitchord_settings", Context.MODE_PRIVATE)
         authStore = AuthStore(context)
         readAll()
         watchConnection(context)
+        com.music.bitchord.download.smart.SmartDownloadStore.init(context)
+        scheduleSmartDownloads(context)
     }
 
     /**
@@ -583,6 +592,9 @@ object AppSettings {
         downloadQuality.value = readDownloadQuality()
         wifiOnlyDownloads.value = prefs.getBoolean(KEY_WIFI_ONLY_DOWNLOADS, true)
         exportDownloads.value = prefs.getBoolean(KEY_EXPORT_DOWNLOADS, false)
+        smartDownloads.value = prefs.getBoolean(KEY_SMART_DOWNLOADS, true)
+        smartDownloadsQuota.value = prefs.getInt(KEY_SMART_DOWNLOADS_QUOTA, 100)
+        smartDownloadsOverMobile.value = prefs.getBoolean(KEY_SMART_DOWNLOADS_OVER_MOBILE, true)
         crossfadeSeconds.value = prefs.getInt(KEY_CROSSFADE, 0)
         smartFadeEnabled.value = prefs.getBoolean(KEY_SMART_FADE, false)
         automixPerformanceMode.value = runCatching {
@@ -808,6 +820,40 @@ object AppSettings {
     fun setWifiOnlyDownloads(value: Boolean) {
         wifiOnlyDownloads.value = value
         prefs.edit().putBoolean(KEY_WIFI_ONLY_DOWNLOADS, value).apply()
+    }
+
+    fun setSmartDownloads(value: Boolean) {
+        smartDownloads.value = value
+        prefs.edit().putBoolean(KEY_SMART_DOWNLOADS, value).apply()
+        appContext?.let { scheduleSmartDownloads(it) }
+    }
+
+    fun setSmartDownloadsQuota(value: Int) {
+        val clamped = value.coerceIn(10, 500)
+        smartDownloadsQuota.value = clamped
+        prefs.edit().putInt(KEY_SMART_DOWNLOADS_QUOTA, clamped).apply()
+        appContext?.let { scheduleSmartDownloads(it) }
+    }
+
+    fun setSmartDownloadsOverMobile(value: Boolean) {
+        smartDownloadsOverMobile.value = value
+        prefs.edit().putBoolean(KEY_SMART_DOWNLOADS_OVER_MOBILE, value).apply()
+        appContext?.let { scheduleSmartDownloads(it) }
+    }
+
+    fun scheduleSmartDownloads(context: Context) {
+        com.music.bitchord.download.smart.SmartDownloadWorker.schedule(
+            context = context,
+            enabled = smartDownloads.value,
+            allowMobile = smartDownloadsOverMobile.value,
+        )
+    }
+
+    fun triggerSmartDownloadsNow(context: Context) {
+        com.music.bitchord.download.smart.SmartDownloadWorker.triggerNow(
+            context = context,
+            allowMobile = smartDownloadsOverMobile.value,
+        )
     }
 
     fun setCrossfadeSeconds(value: Int) {
@@ -1366,6 +1412,9 @@ object AppSettings {
     private const val KEY_QUALITY_DOWNLOAD = "audio_quality_download"
     private const val KEY_WIFI_ONLY_DOWNLOADS = "wifi_only_downloads"
     private const val KEY_EXPORT_DOWNLOADS = "export_downloads"
+    private const val KEY_SMART_DOWNLOADS = "smart_downloads"
+    private const val KEY_SMART_DOWNLOADS_QUOTA = "smart_downloads_quota"
+    private const val KEY_SMART_DOWNLOADS_OVER_MOBILE = "smart_downloads_over_mobile"
     private const val KEY_LOSSLESS = "lossless_audio"
     private const val KEY_CROSSFADE = "crossfade_seconds"
     private const val KEY_SMART_FADE = "smart_fade_enabled"

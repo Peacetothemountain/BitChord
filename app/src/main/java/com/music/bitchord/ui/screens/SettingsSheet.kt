@@ -204,6 +204,9 @@ fun SettingsScreen(
     val downloadQuality by AppSettings.downloadQuality.collectAsStateWithLifecycle()
     val wifiOnlyDownloads by AppSettings.wifiOnlyDownloads.collectAsStateWithLifecycle()
     val exportDownloads by AppSettings.exportDownloads.collectAsStateWithLifecycle()
+    val smartDownloads by AppSettings.smartDownloads.collectAsStateWithLifecycle()
+    val smartDownloadsQuota by AppSettings.smartDownloadsQuota.collectAsStateWithLifecycle()
+    val smartDownloadsOverMobile by AppSettings.smartDownloadsOverMobile.collectAsStateWithLifecycle()
     val stopOnTaskRemoved by AppSettings.stopOnTaskRemoved.collectAsStateWithLifecycle()
     val hideVolumeBar by AppSettings.hideVolumeBar.collectAsStateWithLifecycle()
     val swipeToPlayNext by AppSettings.swipeToPlayNext.collectAsStateWithLifecycle()
@@ -436,6 +439,54 @@ fun SettingsScreen(
                 onCheckedChange = AppSettings::setExportDownloads,
                 badge = "Music/BitChord".takeIf { exportDownloads },
             )
+            RowDivider()
+            SettingsRow(
+                icon = Icons.Rounded.AutoAwesome,
+                title = "Smart Downloads",
+                subtitle = if (smartDownloads) {
+                    "Offline mixtape automatically updated based on your tastes"
+                } else {
+                    "Automatically download recommended music for offline listening"
+                },
+                trailing = {
+                    Switch(
+                        checked = smartDownloads,
+                        onCheckedChange = AppSettings::setSmartDownloads,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                },
+                onClick = { AppSettings.setSmartDownloads(!smartDownloads) },
+            )
+            if (smartDownloads) {
+                SettingsSubRow(
+                    title = "Download over mobile data",
+                    checked = smartDownloadsOverMobile,
+                    onCheckedChange = AppSettings::setSmartDownloadsOverMobile,
+                    badge = "Cellular".takeIf { smartDownloadsOverMobile },
+                )
+                SliderRow(
+                    icon = Icons.Rounded.PlaylistPlay,
+                    title = "Smart download limit",
+                    subtitle = "Maximum number of curated songs to keep offline",
+                    value = "$smartDownloadsQuota songs",
+                    sliderValue = smartDownloadsQuota.toFloat(),
+                    onSliderValue = { AppSettings.setSmartDownloadsQuota(it.roundToInt()) },
+                    valueRange = 25f..500f,
+                    steps = 18,
+                )
+                SettingsRow(
+                    icon = Icons.Rounded.FileDownload,
+                    title = "Sync Smart Downloads now",
+                    subtitle = "Download offline mixtape recommendations immediately",
+                    onClick = {
+                        AppSettings.triggerSmartDownloadsNow(context)
+                        Toast.makeText(context, "Smart Downloads sync started", Toast.LENGTH_SHORT).show()
+                    },
+                )
+            }
         }
 
         SettingsGroup(header = stringResource(R.string.playback)) {

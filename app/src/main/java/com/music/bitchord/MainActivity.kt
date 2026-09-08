@@ -753,11 +753,25 @@ private fun BitChordApp(
      * where the surrounding list *is* the thing the user asked for.
      */
     val playRadio: (Song) -> Unit = { song ->
-        playRequestGeneration++
-        activeRadioSeed = null
+        val request = ++playRequestGeneration
+        activeRadioSeed = song.videoId to (song.radioName ?: song.title)
         scope.launch {
             controller?.playSongs(listOf(song), 0)
             if (!playerDocked) showNowPlaying = true
+
+            val seed = song.copy(radioName = song.title)
+            val related = loadAutoplayTracks(
+                existing = listOf(seed),
+                seedSong = seed,
+                limit = INITIAL_RADIO_TRACKS,
+            ).getOrNull().orEmpty()
+
+            val active = controller
+            if (request == playRequestGeneration && active != null && active.currentMediaItem?.mediaId == song.videoId) {
+                if (related.isNotEmpty()) {
+                    active.addMediaItems(related.map { it.toMediaItem() })
+                }
+            }
         }
     }
 
