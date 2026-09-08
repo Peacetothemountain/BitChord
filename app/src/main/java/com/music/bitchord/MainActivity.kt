@@ -210,8 +210,7 @@ import com.music.bitchord.ui.theme.rememberArtworkPalette
 import com.music.bitchord.ui.theme.SystemBarIcons
 import com.music.bitchord.ui.utils.rememberIosOverscrollFactory
 import com.music.bitchord.ui.performance.resolvePerformanceRefreshRate
-import com.music.bitchord.ui.player.MeshGradientBackground
-import com.music.bitchord.ui.player.rememberArtworkColors
+import com.music.bitchord.ui.components.Material3ExpressiveBackground
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.launch
@@ -1660,14 +1659,7 @@ private fun BitChordApp(
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 val animatedBg by AppSettings.legacyMeshGradient.collectAsStateWithLifecycle()
                 if (animatedBg) {
-                    val appPalette = rememberArtworkColors(
-                        imageUrl = player.song?.thumbnailUrl,
-                    )
-                    MeshGradientBackground(
-                        palette = appPalette,
-                        trackKey = player.song?.videoId ?: "app_idle",
-                        continuous = true,
-                        blurRadius = 64.dp,
+                    Material3ExpressiveBackground(
                         modifier = Modifier
                             .matchParentSize()
                             .hazeSource(hazeState),

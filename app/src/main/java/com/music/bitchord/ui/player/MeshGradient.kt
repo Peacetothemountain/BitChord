@@ -89,18 +89,17 @@ fun MeshGradientBackground(
 
     val dynamicFallbacks = remember(scheme) {
         listOf(
-            scheme.surfaceContainerHigh,
-            scheme.surfaceContainerHighest,
-            scheme.surfaceVariant,
-            scheme.surfaceContainer,
+            scheme.primary,
+            scheme.tertiary,
+            scheme.secondary,
+            scheme.tertiaryContainer,
         )
     }
-    val fallbackMonet = scheme.surfaceContainerHigh
 
     val inputColors = (palette.colors.ifEmpty { dynamicFallbacks } + dynamicFallbacks)
     val tuned = inputColors
         .take(4)
-        .map { it.toMaterialYouGrayish(fallbackMonet) }
+        .map { it.toVibrantAmbientTone(scheme.primary) }
 
     // Each colour slot crossfades independently when the track (palette) changes,
     // unless "reduce animation" is on, in which case colours snap straight to target.
@@ -188,10 +187,10 @@ fun rememberArtworkColors(imageUrl: String?, canvasFrame: Bitmap? = null): MeshP
     val scheme = MaterialTheme.colorScheme
     val dynamicFallbacks = remember(scheme) {
         listOf(
-            scheme.surfaceContainerHigh,
-            scheme.surfaceContainerHighest,
-            scheme.surfaceVariant,
-            scheme.surfaceContainer,
+            scheme.primary,
+            scheme.tertiary,
+            scheme.secondary,
+            scheme.tertiaryContainer,
         )
     }
     var palette by remember(imageUrl) { mutableStateOf(MeshPalette(dynamicFallbacks)) }
@@ -289,27 +288,19 @@ private fun Color.hsl(): FloatArray =
     FloatArray(3).also { ColorUtils.colorToHSL(toArgb(), it) }
 
 /**
- * Tunes the sampled artwork color into a moody, dark, grayish ambient tone
- * reminiscent of YouTube Music's ambient player mode and Material You Monet palette.
- * Keeps saturation in a subtle grayish-slate band (12% - 30% saturation),
- * sets a soft luminous ambient lightness (26% - 38% lightness), and blends
- * 35% with the active Material You Monet surface color.
+ * Tunes the sampled artwork or dynamic color into a vibrant, luminous ambient tone
+ * reflecting Material 3 dynamic color styling. Keeps saturation rich and expressive (40% - 92% saturation),
+ * sets balanced luminous ambient lightness, and preserves authentic color character.
  */
-private fun Color.toMaterialYouGrayish(monetSurface: Color): Color {
+private fun Color.toVibrantAmbientTone(monetPrimary: Color): Color {
     val hsl = FloatArray(3)
     ColorUtils.colorToHSL(toArgb(), hsl)
-    val isMonetDark = ColorUtils.calculateLuminance(monetSurface.toArgb()) < 0.5f
-    // Gentle grayish ambient tone with subtle color character (14% - 30% saturation)
-    hsl[1] = (hsl[1] * 0.38f).coerceIn(0.14f, 0.30f)
+    val isMonetDark = ColorUtils.calculateLuminance(monetPrimary.toArgb()) < 0.5f
+    hsl[1] = (hsl[1] * 1.25f).coerceIn(0.40f, 0.92f)
     if (isMonetDark) {
-        // Soft luminous ambient lightness against dark base (28% - 40% lightness)
-        hsl[2] = hsl[2].coerceIn(0.28f, 0.40f)
+        hsl[2] = hsl[2].coerceIn(0.28f, 0.46f)
     } else {
-        // In light theme, keep it soft and subtle (82% - 94% lightness)
-        hsl[2] = hsl[2].coerceIn(0.82f, 0.94f)
+        hsl[2] = hsl[2].coerceIn(0.70f, 0.88f)
     }
-    val desaturated = Color(ColorUtils.HSLToColor(hsl))
-    // Blend with the system Monet surface container
-    val blended = ColorUtils.blendARGB(desaturated.toArgb(), monetSurface.toArgb(), 0.30f)
-    return Color(blended)
+    return Color(ColorUtils.HSLToColor(hsl))
 }
