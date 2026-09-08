@@ -22,6 +22,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionToken
+import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.NOTIFICATION_ART_PX
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.artworkAt
@@ -593,6 +594,10 @@ fun MediaController.playSongs(songs: List<Song>, startIndex: Int) {
     } else {
         songs to validIndex
     }
+    // Give the chosen track and upcoming track an immediate background head start
+    queue.getOrNull(playIndex)?.videoId?.let { StreamResolver.warm(it) }
+    queue.getOrNull(playIndex + 1)?.videoId?.let { StreamResolver.warm(it) }
+
     setMediaItems(queue.map { it.toMediaItem() }, playIndex, 0L)
     prepare()
     play()

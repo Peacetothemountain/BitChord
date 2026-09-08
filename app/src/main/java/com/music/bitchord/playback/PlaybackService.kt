@@ -602,6 +602,7 @@ class PlaybackService : MediaLibraryService() {
             loadAutoplayForCurrentTrack()
             loadLyricsForCurrentTrack()
             if (exoPlayer.isPlaying) startLyricsTicker()
+            if (exoPlayer.playWhenReady) prefetchAround(exoPlayer)
             mediaSession?.setCustomLayout(notificationButtons())
         }
 

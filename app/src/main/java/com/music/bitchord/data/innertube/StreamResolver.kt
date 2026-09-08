@@ -6,6 +6,7 @@ import com.music.bitchord.data.TrackLog
 import com.music.bitchord.data.Http
 import com.music.bitchord.data.NerdStats
 import com.music.bitchord.data.settings.AppSettings
+import com.music.bitchord.data.sources.SourceRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -14,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -328,6 +330,18 @@ object StreamResolver {
         NerdStats.onStreamPicked(videoId, stream.kbps)
         remember(videoId, stream.url)
         return stream.url
+    }
+
+    /**
+     * Proactively starts resolving [videoId] in the background so that its URL
+     * and formats are ready in [recent] ahead of playback.
+     */
+    fun warm(videoId: String) {
+        if (videoId.isBlank() || SourceRegistry.parseTrackKey(videoId) != null) return
+        if (recent.containsKey(videoId)) return
+        resolverScope.launch {
+            runCatching { resolve(videoId) }
+        }
     }
 
     /**
@@ -1352,7 +1366,7 @@ object StreamResolver {
             .build()
     }
 
-    private const val PROBE_TIMEOUT_SECONDS = 6L
+    private const val PROBE_TIMEOUT_SECONDS = 3L
 
     /**
      * How much the probe asks for, in one range.

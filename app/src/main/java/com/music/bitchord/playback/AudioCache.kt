@@ -19,10 +19,12 @@ import androidx.media3.datasource.cache.ContentMetadata
 import androidx.media3.datasource.cache.ContentMetadataMutations
 import androidx.media3.datasource.cache.SimpleCache
 import java.io.IOException
+import com.music.bitchord.data.innertube.PlayerClient
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.sources.SourceRegistry
 import com.music.bitchord.data.sources.SourceResolver
+import com.music.bitchord.data.sources.SourceStream
 import com.music.bitchord.data.sources.TrackMatcher
 import com.music.bitchord.download.Downloads
 import kotlinx.coroutines.CoroutineScope
@@ -150,7 +152,7 @@ object AudioCache {
      * skips into a single fetch of wherever the listener lands, and leaves the
      * player's opening burst holding the cache entry alone — see [fetchWhole].
      */
-    private const val PREFETCH_DELAY_MS = 8_000L
+    private const val PREFETCH_DELAY_MS = 400L
 
     /** How long to leave the player alone with an entry before trying again. */
     private const val RETRY_DELAY_MS = 5_000L
@@ -165,21 +167,11 @@ object AudioCache {
      * trips, not a stream's worth of data, so paying that cost several tracks
      * early is worth it purely to keep a fast run of skips from ever landing
      * on a track that has to resolve cold.
-     *
-     * One, not three, and the difference is not the round trips. While every
-     * player client is being refused, *every* warm-up falls through to NewPipe
-     * extraction — the one step in this app that does not share out when it is
-     * run concurrently, but collapses: 1.8s alone against 30.3s with three in
-     * flight. Warming three tracks ahead therefore did not cost three cheap
-     * resolves in the background, it cost the track the listener was waiting on
-     * a thirty-second start. See
-     * [StreamResolver][com.music.bitchord.data.innertube.StreamResolver]'s
-     * extraction gate, which serialises what is left of that.
      */
-    private const val QUEUE_LOOKAHEAD = 1
+    private const val QUEUE_LOOKAHEAD = 4
 
     /** Spacing between queued resolves, so warming the queue never competes with the track actually playing. */
-    private const val QUEUE_RESOLVE_STAGGER_MS = 500L
+    private const val QUEUE_RESOLVE_STAGGER_MS = 250L
 
     /** How many upcoming tracks are worth gathering for [prefetchQueue] — the caller doesn't need to know why. */
     const val QUEUE_DEPTH = QUEUE_LOOKAHEAD + 1
@@ -570,10 +562,15 @@ object AudioCache {
                 } else {
                     null
                 }
-                // Safe to fill for the same reason in both cases: either nothing
-                // outranks YouTube and read-ahead is the only writer, or a
-                // source has been pinned and every writer now resolves to it.
-                val cacheBytes = (!substitutable || warmed != null) && !pinnedToYouTube
+                if (warmed == null && !pinnedToYouTube && StreamChoice.of(next) == null) {
+                    runCatching {
+                        val streamUrl = StreamResolver.resolve(next)
+                        val headers = PlayerClient.forStreamUrl(streamUrl).mediaHeaders()
+                        StreamChoice.remember(next, SourceStream(streamUrl, headers = headers), substituted = false)
+                    }
+                }
+                // Preload bytes whenever not explicitly pinned to original YouTube version
+                val cacheBytes = !pinnedToYouTube
                 if (cacheBytes) {
                     launch(TrackLog.about(next)) {
                         delay(PREFETCH_DELAY_MS)
@@ -582,13 +579,8 @@ object AudioCache {
                     }
                 }
                 launch {
-                    delay(PREFETCH_DELAY_MS)
                     for (id in videoIds.take(QUEUE_LOOKAHEAD + 1).let { if (cacheBytes) it.drop(1) else it }) {
-                        // A track already pinned to another source has no use
-                        // for a YouTube URL: nothing will ask for one, and
-                        // minting it spends a client walk to fill a cache entry
-                        // that is never read.
-                        if (id == next && warmed != null) continue
+                        if (id == next && (warmed != null || StreamChoice.of(next) != null)) continue
                         runCatching { StreamResolver.resolve(id) }
                             .onFailure { TrackLog.d(TAG, "queue warm-up skipped $id: ${it.message}", about = id) }
                         delay(QUEUE_RESOLVE_STAGGER_MS)
