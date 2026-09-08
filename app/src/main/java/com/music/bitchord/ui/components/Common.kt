@@ -465,12 +465,20 @@ private fun SongRowContent(
             // illustrated one share a left edge and a divider inset.
             Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
                 if (isCurrent) {
-                    Icon(
-                        imageVector = if (isPlaying) Icons.Rounded.GraphicEq else Icons.Rounded.PlayArrow,
-                        contentDescription = stringResource(R.string.now_playing),
-                        tint = activeTint,
-                        modifier = Modifier.size(22.dp),
-                    )
+                    if (isPlaying) {
+                        ExpressivePlayingEqualizer(
+                            isPlaying = true,
+                            tint = activeTint,
+                            size = 20.dp,
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.PlayArrow,
+                            contentDescription = stringResource(R.string.now_playing),
+                            tint = activeTint,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
                 } else {
                     Text(
                         text = "$trackNumber",
@@ -523,12 +531,20 @@ private fun SongRowContent(
         }
         if (isCurrent && trackNumber == null) {
             Spacer(Modifier.width(8.dp))
-            Icon(
-                imageVector = if (isPlaying) Icons.Rounded.GraphicEq else Icons.Rounded.PlayArrow,
-                contentDescription = stringResource(R.string.now_playing),
-                tint = activeTint,
-                modifier = Modifier.size(20.dp),
-            )
+            if (isPlaying) {
+                ExpressivePlayingEqualizer(
+                    isPlaying = true,
+                    tint = activeTint,
+                    size = 18.dp,
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Rounded.PlayArrow,
+                    contentDescription = stringResource(R.string.now_playing),
+                    tint = activeTint,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
         song.durationText?.let {
             Spacer(Modifier.width(8.dp))

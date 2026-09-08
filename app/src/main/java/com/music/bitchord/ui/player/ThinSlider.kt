@@ -5,6 +5,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -95,8 +96,8 @@ fun ThinSlider(
         label = "wavePhase",
     )
 
-    // Wave amplitude smooth transition: wavy while playing, straightens when paused or dragged
-    val targetWaveAmplitude = if (squiggly) 3.5.dp else 0.dp
+    // Wave amplitude smooth transition: wavy while playing, straightens smoothly when paused or dragged
+    val targetWaveAmplitude = if (squiggly && isPlaying && !dragging) 3.5.dp else 0.dp
     val waveAmplitude by animateDpAsState(
         targetValue = targetWaveAmplitude,
         animationSpec = spring(
@@ -104,6 +105,16 @@ fun ThinSlider(
             stiffness = Spring.StiffnessMediumLow,
         ),
         label = "waveAmp",
+    )
+
+    // Tactile thumb scale: expands dynamically when dragging/scrubbing
+    val thumbScale by animateFloatAsState(
+        targetValue = if (dragging) 1.28f else 1.0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "thumbScale",
     )
 
     Box(
@@ -170,10 +181,10 @@ fun ThinSlider(
             val ampPx = waveAmplitude.toPx()
 
             if (filled > 0f && !mixing) {
-                if (ampPx > 0.15f) {
-                    // Draw squiggly sine wave along played portion
-                    val waveLengthPx = 22.dp.toPx()
-                    val dampDistance = 14.dp.toPx()
+                if (ampPx > 0.05f) {
+                    // Draw squiggly sine wave along played portion with organic damping
+                    val waveLengthPx = 24.dp.toPx()
+                    val dampDistance = 16.dp.toPx()
                     val wavePath = Path()
                     wavePath.moveTo(0f, centerY)
 
@@ -198,15 +209,8 @@ fun ThinSlider(
                             join = StrokeJoin.Round,
                         ),
                     )
-
-                    // Draw active thumb knob at the playhead
-                    drawCircle(
-                        color = activeColor,
-                        radius = (trackStroke * 0.75f).coerceAtLeast(4.dp.toPx()),
-                        center = Offset(filled, centerY),
-                    )
                 } else {
-                    // Smooth flat active track
+                    // Smooth flat active track when paused or straight
                     drawRoundRect(
                         color = activeColor,
                         topLeft = Offset(0f, centerY - trackStroke / 2f),
@@ -214,6 +218,16 @@ fun ThinSlider(
                         cornerRadius = radius,
                     )
                 }
+
+                // Material 3 Expressive tactile thumb capsule at playhead
+                val thumbWidth = (trackStroke * 0.95f * thumbScale).coerceAtLeast(5.dp.toPx())
+                val thumbHeight = (trackStroke * 1.55f * thumbScale).coerceAtLeast(14.dp.toPx())
+                drawRoundRect(
+                    color = activeColor,
+                    topLeft = Offset(filled - thumbWidth / 2f, centerY - thumbHeight / 2f),
+                    size = Size(thumbWidth, thumbHeight),
+                    cornerRadius = CornerRadius(thumbWidth / 2f),
+                )
             }
         }
 

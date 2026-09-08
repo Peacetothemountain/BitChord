@@ -182,10 +182,10 @@ fun MiniPlayer(
             }
             if (isLoading) {
                 Box(Modifier.size(GLYPH_SLOT), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(
+                    ExpressiveShapeSpinner(
                         color = MaterialTheme.colorScheme.onBackground,
                         strokeWidth = 2.dp,
-                        modifier = Modifier.size(SPINNER_SIZE),
+                        size = SPINNER_SIZE,
                     )
                 }
             } else {

@@ -41,6 +41,9 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.verticalDrag
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import com.music.bitchord.ui.components.ExpressivePlayingEqualizer
+import com.music.bitchord.ui.components.ExpressiveShapeSpinner
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -2005,6 +2008,7 @@ fun NowPlayingScreen(
                         InlineQueue(
                             queue = queue,
                             currentIndex = queueIndex,
+                            isPlaying = isPlaying,
                             autoplayEnabled = autoplayEnabled,
                             onJumpTo = onJumpTo,
                             onRemove = onRemoveFromQueue,
@@ -2283,11 +2287,11 @@ fun NowPlayingScreen(
                 if (isLoading) {
                     // Same footprint as TransportGlyph(62.dp) — a smaller box
                     // here would shunt everything below it on every load.
-                    Box(Modifier.size(74.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(
+                    Box(Modifier.size(76.dp), contentAlignment = Alignment.Center) {
+                        ExpressiveShapeSpinner(
                             color = Color.White,
                             strokeWidth = 3.dp,
-                            modifier = Modifier.size(38.dp),
+                            size = 38.dp,
                         )
                     }
                 } else {
@@ -3495,12 +3499,38 @@ private fun TransportGlyph(
         targetValue = if (enabled) 1f else 0.3f,
         label = "transportAlpha",
     )
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val isPrimary = size >= 60.dp
+
+    // Material 3 Expressive tactile spring scale
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed && enabled) 0.88f else 1.0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "transportScale",
+    )
+
+    val shape = if (isPrimary) RoundedCornerShape(size / 2.2f) else CircleShape
+    val containerColor = if (isPrimary) {
+        Color.White.copy(alpha = if (isPressed) 0.22f else 0.14f)
+    } else {
+        Color.Transparent
+    }
+
     Box(
         modifier = Modifier
-            .size(size + 12.dp)
-            .clip(CircleShape)
+            .size(size + 14.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(shape)
+            .background(containerColor)
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interactionSource,
                 indication = null,
                 enabled = enabled,
             ) {
@@ -3812,6 +3842,7 @@ private fun InlineQueue(
     onMove: (Int, Int) -> Unit,
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
+    isPlaying: Boolean = true,
 ) {
     val listState = rememberLazyListState()
     val keepScroll = remember(listState) { keepScrollInList(listState) }
@@ -3926,6 +3957,7 @@ private fun InlineQueue(
                 InlineQueueRow(
                     song = song,
                     isCurrent = index == currentIndex,
+                    isPlaying = isPlaying,
                     onClick = { onJumpTo(index) },
                     onRemove = { onRemove(index) },
                     // Only what's still queued ahead. The playing track and
@@ -3993,6 +4025,7 @@ private fun InlineQueue(
                 InlineQueueRow(
                     song = song,
                     isCurrent = at == currentIndex,
+                    isPlaying = isPlaying,
                     onClick = { onJumpTo(at) },
                     onRemove = { onRemove(at) },
                     draggable = true,
@@ -4408,6 +4441,7 @@ private fun InlineQueueRow(
     modifier: Modifier = Modifier,
     draggable: Boolean = false,
     dragging: Boolean = false,
+    isPlaying: Boolean = true,
     onDragStart: () -> Unit = {},
     onDrag: (Float) -> Unit = {},
     onDragEnd: () -> Unit = {},
@@ -4486,12 +4520,20 @@ private fun InlineQueueRow(
             )
         }
         if (isCurrent) {
-            Icon(
-                Icons.Rounded.GraphicEq,
-                contentDescription = stringResource(R.string.now_playing),
-                tint = Color.White,
-                modifier = Modifier.size(18.dp),
-            )
+            if (isPlaying) {
+                ExpressivePlayingEqualizer(
+                    isPlaying = true,
+                    tint = Color.White,
+                    size = 18.dp,
+                )
+            } else {
+                Icon(
+                    Icons.Rounded.PlayArrow,
+                    contentDescription = stringResource(R.string.now_playing),
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
             Spacer(Modifier.width(10.dp))
         }
         Box(

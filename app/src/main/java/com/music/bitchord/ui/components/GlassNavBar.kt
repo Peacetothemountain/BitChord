@@ -360,10 +360,10 @@ private fun GlassNowPlaying(
             }
             if (isLoading) {
                 Box(Modifier.size(glyphSlot), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(
+                    ExpressiveShapeSpinner(
                         color = contentColor,
                         strokeWidth = 2.dp,
-                        modifier = Modifier.size(if (isInline) 18.dp else 22.dp),
+                        size = if (isInline) 18.dp else 22.dp,
                     )
                 }
             } else {
