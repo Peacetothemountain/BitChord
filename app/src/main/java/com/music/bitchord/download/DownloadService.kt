@@ -7,8 +7,10 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.music.bitchord.R
 import com.music.bitchord.data.model.Song
@@ -42,9 +44,46 @@ class DownloadService : Service() {
     private var drain: Job? = null
     private var notifier: Job? = null
 
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
+
     /** What the notification is currently about. */
     @Volatile
     private var current: Song? = null
+
+    private fun acquireLocks() {
+        if (wakeLock == null) {
+            val pm = getSystemService(PowerManager::class.java)
+            wakeLock = pm?.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "BitChord:DownloadServiceWakeLock",
+            )?.apply {
+                setReferenceCounted(false)
+                acquire(2 * 60 * 60 * 1000L)
+            }
+        }
+        if (wifiLock == null) {
+            val wm = applicationContext.getSystemService(WifiManager::class.java)
+            wifiLock = wm?.createWifiLock(
+                WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                "BitChord:DownloadServiceWifiLock",
+            )?.apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }
+    }
+
+    private fun releaseLocks() {
+        runCatching {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+        }
+        wakeLock = null
+        runCatching {
+            if (wifiLock?.isHeld == true) wifiLock?.release()
+        }
+        wifiLock = null
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -67,6 +106,7 @@ class DownloadService : Service() {
         }
 
         if (drain == null) {
+            acquireLocks()
             drain = scope.launch {
                 drainQueue()
                 // Not shutdown(stopWork = true): this is the drain coroutine,
@@ -152,13 +192,19 @@ class DownloadService : Service() {
         notifier?.cancel()
         drain = null
         notifier = null
+        releaseLocks()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     override fun onDestroy() {
+        releaseLocks()
         scope.cancel()
+        val hasPending = Downloads.busy()
         Downloads.onStopped()
+        if (hasPending) {
+            DownloadQueueWorker.enqueue(applicationContext)
+        }
         super.onDestroy()
     }
 

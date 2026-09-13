@@ -12,9 +12,14 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.music.bitchord.data.DebugLog as Log
 import com.music.bitchord.data.settings.AppSettings
+import com.music.bitchord.download.DownloadSession
 import com.music.bitchord.download.DownloadTarget
 import com.music.bitchord.download.Downloads
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
@@ -68,15 +73,31 @@ class SmartDownloadWorker(
         val saved = Downloads.saved.value
         val missing = candidates.filter { it.videoId !in saved }
 
-        Log.d(TAG, "Found ${candidates.size} curated tracks (${missing.size} new to download)")
+        if (missing.isNotEmpty()) {
+            // Register queued state in DownloadSession so UI can observe it
+            missing.forEach { song ->
+                DownloadSession.queued(song, "Smart Downloads")
+            }
 
-        missing.forEach { song ->
-            Downloads.enqueue(
-                context = applicationContext,
-                song = song,
-                from = "Smart Downloads",
-                forceAllowMobile = allowMobile,
-            )
+            // Concurrently download tracks directly in the background worker
+            val semaphore = Semaphore(2)
+            coroutineScope {
+                missing.forEach { song ->
+                    launch {
+                        semaphore.withPermit {
+                            val job = launch {
+                                try {
+                                    Downloads.run(applicationContext, song)
+                                } finally {
+                                    Downloads.onIdle(song.videoId)
+                                }
+                            }
+                            Downloads.onRunning(song.videoId, job)
+                            job.join()
+                        }
+                    }
+                }
+            }
         }
 
         SmartDownloadStore.recordSmartDownloads(candidates.map { it.videoId })

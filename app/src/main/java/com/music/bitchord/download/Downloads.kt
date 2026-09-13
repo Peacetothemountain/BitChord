@@ -197,15 +197,18 @@ object Downloads {
         DownloadSession.queued(song, from)
 
         val app = context.applicationContext
-        runCatching {
+        val started = runCatching {
             ContextCompat.startForegroundService(app, Intent(app, DownloadService::class.java))
-        }.onFailure {
-            // Refused only when the app has no window and no exemption, which
-            // means the queue has nothing to drain it and would sit there
-            // looking accepted forever.
+            true
+        }.getOrElse {
             Log.w(TAG, "could not start the download service: ${it.message}")
-            synchronized(lock) { pending.remove(id) }
-            fail(id, "Downloads can't start right now")
+            false
+        }
+
+        if (!started) {
+            // Foreground service could not start (e.g. app in background or Android 14+ FGS launch restriction).
+            // Dispatch a WorkManager worker to safely drain the queue in the background.
+            DownloadQueueWorker.enqueue(app)
         }
     }
 
