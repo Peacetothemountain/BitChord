@@ -13,6 +13,7 @@ import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.graphics.SurfaceTexture
 import android.os.Build
+import android.util.Log
 import android.view.TextureView
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -54,6 +55,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.math.roundToInt
 import java.util.Locale
+
+private const val TAG = "CanvasArtworkPlayer"
 
 /**
  * How long a clip gets to paint itself onto a surface it was just handed back
@@ -176,11 +179,6 @@ fun CanvasArtworkPlayer(
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
-            override fun onRenderedFirstFrame() {
-                rendered = true
-                frameTick++
-            }
-
             override fun onVideoSizeChanged(videoSize: VideoSize) {
                 val width = videoSize.width * videoSize.pixelWidthHeightRatio
                 if (width > 0f && videoSize.height > 0) {
@@ -232,36 +230,41 @@ fun CanvasArtworkPlayer(
     val foreground = rememberIsForeground()
     LaunchedEffect(foreground) { player.playWhenReady = foreground }
 
-    // Repaint a paused clip onto a surface it has just been given back.\
-        //
-        // A TextureView's SurfaceTexture does not survive the app going off screen:
-        // it is torn down with the activity's hardware layer and a brand new, empty
-        // one is handed over on the way back. A clip that is playing fills it on the
-        // next frame and nobody notices. A paused one has no next frame — the
-        // decoder is parked, `setOutputSurface` does not redraw what was already
-        // released to the old surface, and the view sits there transparent.
-        //
-        // Which reads as a hole rather than as a still sleeve, because by then the
-        // still art underneath has been faded out from under the clip (see
-        // [onCoverChanged]). So: seek to where we already are, which is the one
-        // thing that makes a paused player render, and if no frame arrives from it
-        // give up and drop back to the still art rather than leaving the hole.
+    // Repaint onto a surface that has just been handed back. A TextureView's
+    // SurfaceTexture does not survive every background/layout transition, and
+    // ExoPlayer's old "first frame rendered" callback says nothing about the
+    // replacement surface. Keep the still artwork visible while waiting, ask
+    // the decoder to paint at its current position, and only hand back to the
+    // clip when onSurfaceTextureUpdated confirms real pixels below.
     LaunchedEffect(surfaceGeneration) {
         if (surfaceGeneration == 0) return@LaunchedEffect
-        // playWhenReady is now driven by foreground state, so when the app returns\
-        // from background, foreground becomes true and playWhenReady is set to true,\
-        // allowing ExoPlayer to naturally render frames and fire onRenderedFirstFrame().\
+        rendered = false
+        val before = frameTick
+        if (player.playbackState != Player.STATE_IDLE) {
+            player.seekTo(player.currentPosition)
+        }
+        delay(REPAINT_TIMEOUT_MS)
+        if (frameTick == before) {
+            rendered = false
+        }
     }
 
+    val reportRendered by rememberUpdatedState(onRenderedChanged)
     LaunchedEffect(rendered) {
-        onRenderedChanged(rendered)
+        reportRendered(rendered)
         if (!rendered) return@LaunchedEffect
         // Let the surface actually paint the frame that just triggered this
         // before reading it back — grabbing it the instant the callback fires
         // can still catch the previous, empty buffer.
         withFrameMillis { }
         val view = textureView ?: return@LaunchedEffect
-        view.captureAt(frameCapturePx)?.let(onFrameCaptured)
+        val bitmap = view.captureAt(frameCapturePx)
+        if (bitmap != null) {
+            Log.d(TAG, "frame captured after rendered=true, size=${bitmap.width}x${bitmap.height}")
+            onFrameCaptured(bitmap)
+        } else {
+            Log.w(TAG, "frame capture returned null after rendered=true")
+        }
     }
 
     // The opt-in follow-up to the capture above, for a caller that asked for
@@ -271,11 +274,18 @@ fun CanvasArtworkPlayer(
     // has actually happened and then keep going for as long as it holds.
     LaunchedEffect(rendered, refreshFrameEveryMs, frameCapturePx) {
         val interval = refreshFrameEveryMs ?: return@LaunchedEffect
+        Log.d(TAG, "periodic frame refresh started, interval=$interval")
         if (!rendered) return@LaunchedEffect
         while (isActive) {
             delay(interval)
             val view = textureView ?: continue
-            view.captureAt(frameCapturePx)?.let(onFrameCaptured)
+            val bitmap = view.captureAt(frameCapturePx)
+            if (bitmap != null) {
+                Log.d(TAG, "periodic frame captured, size=${bitmap.width}x${bitmap.height}")
+                onFrameCaptured(bitmap)
+            } else {
+                Log.w(TAG, "periodic frame capture returned null")
+            }
         }
     }
 
@@ -291,7 +301,14 @@ fun CanvasArtworkPlayer(
     // hidden behind a clip that is no longer mounted.
     val reportCover by rememberUpdatedState(onCoverChanged)
     LaunchedEffect(Unit) { snapshotFlow { alpha }.collect { reportCover(it) } }
-    DisposableEffect(Unit) { onDispose { reportCover(0f) } }
+    DisposableEffect(Unit) {
+        onDispose {
+            // The parent owns the still/canvas handoff. Never leave it holding
+            // a Success from a player or TextureView that no longer exists.
+            reportRendered(false)
+            reportCover(0f)
+        }
+    }
 
     AndroidView(
         factory = { viewContext ->
@@ -330,6 +347,7 @@ fun CanvasArtworkPlayer(
                         // The first surface needs nothing: prepare() paints it.
                         if (!replacing) return
                         replacing = false
+                        Log.d(TAG, "surface recreated (gen $surfaceGeneration), waiting for frame")
                         surfaceGeneration++
                     }
 
@@ -343,11 +361,25 @@ fun CanvasArtworkPlayer(
 
                     override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
                         replacing = true
+                        Log.d(TAG, "surface destroyed, rendered=$rendered")
+                        // The old buffer is gone now, not when/if ExoPlayer
+                        // later reports another first frame. Restore the still
+                        // artwork immediately so an empty replacement surface
+                        // can never become the only visible artwork layer.
+                        rendered = false
                         return delegate?.onSurfaceTextureDestroyed(surface) ?: true
                     }
 
                     override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
                         delegate?.onSurfaceTextureUpdated(surface)
+                        // This callback is the proof that the current
+                        // TextureView, rather than some previously destroyed
+                        // surface, contains a drawable video buffer.
+                        if (!rendered) {
+                            rendered = true
+                            frameTick++
+                            Log.d(TAG, "first frame on surface (tick $frameTick, gen $surfaceGeneration)")
+                        }
                     }
                 }
             }

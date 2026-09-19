@@ -10,6 +10,8 @@ import com.music.bitchord.BuildConfig
 import com.music.bitchord.auth.AuthStore
 import com.music.bitchord.data.lyrics.LyricsSource
 import com.music.bitchord.data.sources.SourceKind
+import com.music.bitchord.playback.EqLayout
+import com.music.bitchord.playback.EqualizerPreset
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -99,6 +101,21 @@ enum class ThemeMode(val label: String) {
     SYSTEM("System"), LIGHT("Light"), DARK("Dark")
 }
 
+/**
+ * Which of the equaliser's two tabs is driving the sound.
+ *
+ * One at a time rather than both at once: they are two ways of describing the
+ * same curve, and summing them would mean a tone pad sitting at dead centre
+ * still quietly altering whatever the sliders said.
+ */
+enum class EqualizerMode {
+    /** The tone pad: tilt, contour, and how wide each is. */
+    DYNAMIC,
+
+    /** Seven sliders and a preset list. */
+    MANUAL,
+}
+
 /** CPU budget for Automix's background analysis, not its audible mix algorithm. */
 enum class AutomixPerformanceMode(val inferenceThreads: Int) {
     EFFICIENT(1),
@@ -124,6 +141,23 @@ enum class LibrarySort {
     DEFAULT,
     TITLE_ASC,
     TITLE_DESC,
+}
+
+/**
+ * Ordering for the track list on an album or playlist page — the same idea as
+ * the Downloads folder's sort, with a date option for the one thing a
+ * catalogue row can still be dated by: the position it sits at. A playlist's
+ * running order is the order songs were added in — YouTube Music appends each
+ * addition at the foot — so read backwards it *is* a date order, newest first.
+ * DetailScreen.kt holds the sort itself. Persisted app-wide rather than per
+ * page: one choice, kept until the user makes another.
+ */
+enum class SongSort {
+    DEFAULT,
+    TITLE_ASC,
+    TITLE_DESC,
+    DATE_ADDED_ASC,
+    DATE_ADDED_DESC,
 }
 
 /** Display mode for music lists: compact rows or grid cards. */
@@ -154,6 +188,9 @@ object AppSettings {
      */
     val audioQualityWifi = MutableStateFlow(AudioQuality.LOSSLESS)
     val audioQualityCellular = MutableStateFlow(AudioQuality.LOSSLESS)
+
+    /** Allowed duration difference when replacing a playing stream with one from a source. */
+    val upgradeLengthSlackSeconds = MutableStateFlow(DEFAULT_UPGRADE_LENGTH_SLACK_SECONDS)
 
     /**
      * What a saved file should be, answered on its own terms.
@@ -270,6 +307,45 @@ object AppSettings {
      * us a stereo stream, so there's no Atmos-style source to render.
      */
     val spatialAudio = MutableStateFlow(false)
+
+    /**
+     * The app's own equaliser, master switch.
+     *
+     * Separate from the system equaliser row beside it, which is still there and
+     * still opens the device's panel. The two stack rather than compete — this
+     * one runs inside ExoPlayer before the sink, that one hangs off the audio
+     * session after it — so someone who prefers their OEM's can leave this off
+     * and lose nothing.
+     */
+    val equalizerEnabled = MutableStateFlow(false)
+
+    /** Which tab is driving it. */
+    val equalizerMode = MutableStateFlow(EqualizerMode.DYNAMIC)
+
+    /** Tone pad, horizontal: warm at -5, bright at +5. */
+    val equalizerToneX = MutableStateFlow(0)
+
+    /** Tone pad, vertical: scooped at -5, mid-forward at +5. */
+    val equalizerToneY = MutableStateFlow(0)
+
+    /** Tone pad bandwidth: Broad when false, Focused when true. */
+    val equalizerFocused = MutableStateFlow(false)
+
+    /** Left/right trim, -1 hard left to +1 hard right. Applies to both tabs. */
+    val equalizerBalance = MutableStateFlow(0f)
+
+    /** The manual tab's seven gains, in decibels, low to high. */
+    val equalizerBands = MutableStateFlow(EqualizerPreset.FLAT.bands)
+
+    /**
+     * Which preset the bands currently are, or [EqualizerPreset.CUSTOM].
+     *
+     * Derived from [equalizerBands] rather than independent of it — see
+     * [setEqualizerBands] — so a slider dragged back to where a preset left it
+     * makes the row say that preset's name again instead of "Custom" forever.
+     */
+    val equalizerPreset = MutableStateFlow(EqualizerPreset.FLAT)
+
     val playbackSpeed = MutableStateFlow(1.0f)
     val themeMode = MutableStateFlow(ThemeMode.DARK)
 
@@ -306,6 +382,13 @@ object AppSettings {
     /** Once a song has been suggested or played this session, AutoPlay won't offer it again. */
     val dontRepeatSuggestions = MutableStateFlow(false)
 
+    /**
+     * Prefer the catalogue audio release when the selected result is a music
+     * video. The video itself is still handed to the player first so its
+     * metadata appears immediately while the catalogue match is resolved.
+     */
+    val preferMusicOnly = MutableStateFlow(false)
+
     /** Drops haze blur (status bar, mini player, bottom fade, lyrics focus) for a solid-fill look. */
     val reduceDynamicBlur = MutableStateFlow(false)
 
@@ -314,6 +397,20 @@ object AppSettings {
 
     /** Blurs unfocused lyric lines, keeping the active line sharp. */
     val lyricsBlur = MutableStateFlow(true)
+
+    /** Positive values delay synced lyrics; negative values bring them forward. */
+    val lyricsOffsetMs = MutableStateFlow(0)
+
+    /**
+     * Which language the lyrics translate button translates *into*.
+     *
+     * Blank — the default — means "whatever the app is set to", and is stored
+     * as blank rather than resolved once: someone who has never touched this
+     * has expressed no preference, and switching the app to Spanish should
+     * carry their lyrics with it rather than leaving them on the English they
+     * happened to be reading the day the setting was written.
+     */
+    val translationLanguage = MutableStateFlow("")
 
     /**
      * Plays a looping video behind the cover art on the player when one is
@@ -393,8 +490,8 @@ object AppSettings {
      */
     val prioritizeSyllableSync = MutableStateFlow(false)
 
-    /** When enabled, shows lyrics fetching and Genius scraping logs in the lyrics menu/panel. */
-    val showLyricsLogs = MutableStateFlow(false)
+    /** User-issued credential required by api.paxsenix.org. */
+    val paxSenixApiKey = MutableStateFlow("")
 
     /** Disk budget for cached audio. [AudioCache][com.music.bitchord.playback.AudioCache] evicts past it. */
     val audioCacheLimitBytes = MutableStateFlow(DEFAULT_CACHE_LIMIT_BYTES)
@@ -422,7 +519,16 @@ object AppSettings {
     val downloadedMusicSort = MutableStateFlow(LocalMusicSort.TITLE_ASC)
     val localMusicViewType = MutableStateFlow(LibraryViewType.LIST)
     val downloadedMusicViewType = MutableStateFlow(LibraryViewType.LIST)
+    /** Layout used by the Recents shelf on Play; compact tracks are the default. */
+    val homeRecentsViewType = MutableStateFlow(LibraryViewType.LIST)
     val librarySort = MutableStateFlow(LibrarySort.DEFAULT)
+
+    /**
+     * Each album/playlist page's track-list order, keyed by browse id —
+     * Spotify-style, every page keeps its own. A page never touched reads as
+     * [SongSort.DEFAULT].
+     */
+    val detailSongSorts = MutableStateFlow<Map<String, SongSort>>(emptyMap())
 
     /** Empty means every MediaStore folder; otherwise this is a persisted SAF tree URI. */
     val localMusicFolderUri = MutableStateFlow("")
@@ -588,6 +694,10 @@ object AppSettings {
         migrateSingleQuality()
         audioQualityWifi.value = readQuality(KEY_QUALITY_WIFI)
         audioQualityCellular.value = readQuality(KEY_QUALITY_CELLULAR)
+        upgradeLengthSlackSeconds.value = prefs.getInt(
+            KEY_UPGRADE_LENGTH_SLACK_SECONDS,
+            DEFAULT_UPGRADE_LENGTH_SLACK_SECONDS,
+        ).coerceIn(MIN_UPGRADE_LENGTH_SLACK_SECONDS, MAX_UPGRADE_LENGTH_SLACK_SECONDS)
         migrateDownloadQuality()
         downloadQuality.value = readDownloadQuality()
         wifiOnlyDownloads.value = prefs.getBoolean(KEY_WIFI_ONLY_DOWNLOADS, true)
@@ -612,6 +722,16 @@ object AppSettings {
         preferUsbDac.value = prefs.getBoolean(KEY_PREFER_USB_DAC, false)
         dolbyAtmos.value = prefs.getBoolean(KEY_DOLBY_ATMOS, true)
         spatialAudio.value = prefs.getBoolean(KEY_SPATIAL_AUDIO, false)
+        equalizerEnabled.value = prefs.getBoolean(KEY_EQ_ENABLED, false)
+        equalizerMode.value = runCatching {
+            EqualizerMode.valueOf(prefs.getString(KEY_EQ_MODE, null) ?: EqualizerMode.DYNAMIC.name)
+        }.getOrDefault(EqualizerMode.DYNAMIC)
+        equalizerToneX.value = prefs.getInt(KEY_EQ_TONE_X, 0).coerceIn(-EqLayout.TONE_STEPS, EqLayout.TONE_STEPS)
+        equalizerToneY.value = prefs.getInt(KEY_EQ_TONE_Y, 0).coerceIn(-EqLayout.TONE_STEPS, EqLayout.TONE_STEPS)
+        equalizerFocused.value = prefs.getBoolean(KEY_EQ_FOCUSED, false)
+        equalizerBalance.value = prefs.getFloat(KEY_EQ_BALANCE, 0f).coerceIn(-1f, 1f)
+        equalizerBands.value = readEqualizerBands()
+        equalizerPreset.value = EqualizerPreset.matching(equalizerBands.value)
         playbackSpeed.value = prefs.getFloat(KEY_SPEED, 1.0f)
         themeMode.value = runCatching {
             ThemeMode.valueOf(prefs.getString(KEY_THEME, null) ?: "DARK")
@@ -629,9 +749,13 @@ object AppSettings {
         hideVolumeBar.value = prefs.getBoolean(KEY_HIDE_VOLUME_BAR, false)
         swipeToPlayNext.value = prefs.getBoolean(KEY_SWIPE_TO_PLAY_NEXT, false)
         dontRepeatSuggestions.value = prefs.getBoolean(KEY_DONT_REPEAT_SUGGESTIONS, false)
+        preferMusicOnly.value = prefs.getBoolean(KEY_PREFER_MUSIC_ONLY, false)
         reduceDynamicBlur.value = prefs.getBoolean(KEY_REDUCE_BLUR, false)
         liquidGlass.value = prefs.getBoolean(KEY_LIQUID_GLASS, false)
         lyricsBlur.value = prefs.getBoolean(KEY_LYRICS_BLUR, true)
+        lyricsOffsetMs.value = prefs.getInt(KEY_LYRICS_OFFSET_MS, 0)
+            .coerceIn(MIN_LYRICS_OFFSET_MS, MAX_LYRICS_OFFSET_MS)
+        translationLanguage.value = prefs.getString(KEY_TRANSLATION_LANGUAGE, "").orEmpty()
         if (highPerformanceMode.value) {
             reduceAnimation.value = false
             reduceDynamicBlur.value = false
@@ -644,7 +768,8 @@ object AppSettings {
         lyricsSources.value = readLyricsSources()
         lyricsSourceOrder.value = readLyricsSourceOrder()
         prioritizeSyllableSync.value = prefs.getBoolean(KEY_PRIORITIZE_SYLLABLE_SYNC, false)
-        showLyricsLogs.value = prefs.getBoolean(KEY_SHOW_LYRICS_LOGS, false)
+        paxSenixApiKey.value = prefs.getString(KEY_PAXSENIX_API_KEY, "").orEmpty()
+        com.music.bitchord.data.lyrics.PaxSenix.setApiKey(paxSenixApiKey.value)
         audioCacheLimitBytes.value = prefs.getLong(KEY_CACHE_LIMIT, DEFAULT_CACHE_LIMIT_BYTES)
             .coerceIn(DEFAULT_CACHE_LIMIT_BYTES, MAX_CACHE_LIMIT_BYTES)
         lastfmEnabled.value = prefs.getBoolean(KEY_LASTFM_ENABLED, false)
@@ -669,9 +794,11 @@ object AppSettings {
         downloadedMusicSort.value = readLocalMusicSort(KEY_DOWNLOADED_MUSIC_SORT)
         localMusicViewType.value = readLibraryViewType(KEY_LOCAL_MUSIC_VIEW_TYPE)
         downloadedMusicViewType.value = readLibraryViewType(KEY_DOWNLOADED_MUSIC_VIEW_TYPE)
+        homeRecentsViewType.value = readLibraryViewType(KEY_HOME_RECENTS_VIEW_TYPE)
         librarySort.value = prefs.getString(KEY_LIBRARY_SORT, null)
             ?.let { saved -> LibrarySort.entries.firstOrNull { it.name == saved } }
             ?: LibrarySort.DEFAULT
+        detailSongSorts.value = readDetailSongSorts()
         localMusicFolderUri.value = prefs.getString(KEY_LOCAL_MUSIC_FOLDER_URI, "").orEmpty()
         pinnedPlaylists.value = readPinnedPlaylists()
         discordToken.value = authStore.discordToken.orEmpty()
@@ -812,6 +939,15 @@ object AppSettings {
         prefs.edit().putString(KEY_QUALITY_CELLULAR, value.name).apply()
     }
 
+    fun setUpgradeLengthSlackSeconds(value: Int) {
+        val normalized = value.coerceIn(
+            MIN_UPGRADE_LENGTH_SLACK_SECONDS,
+            MAX_UPGRADE_LENGTH_SLACK_SECONDS,
+        )
+        upgradeLengthSlackSeconds.value = normalized
+        prefs.edit().putInt(KEY_UPGRADE_LENGTH_SLACK_SECONDS, normalized).apply()
+    }
+
     fun setDownloadQuality(value: DownloadQuality) {
         downloadQuality.value = value
         prefs.edit().putString(KEY_QUALITY_DOWNLOAD, value.name).apply()
@@ -886,6 +1022,70 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_SPATIAL_AUDIO, value).apply()
     }
 
+    fun setEqualizerEnabled(value: Boolean) {
+        equalizerEnabled.value = value
+        prefs.edit().putBoolean(KEY_EQ_ENABLED, value).apply()
+    }
+
+    fun setEqualizerMode(value: EqualizerMode) {
+        equalizerMode.value = value
+        prefs.edit().putString(KEY_EQ_MODE, value.name).apply()
+    }
+
+    fun setEqualizerTone(x: Int, y: Int) {
+        val steps = EqLayout.TONE_STEPS
+        val clampedX = x.coerceIn(-steps, steps)
+        val clampedY = y.coerceIn(-steps, steps)
+        equalizerToneX.value = clampedX
+        equalizerToneY.value = clampedY
+        prefs.edit().putInt(KEY_EQ_TONE_X, clampedX).putInt(KEY_EQ_TONE_Y, clampedY).apply()
+    }
+
+    fun setEqualizerFocused(value: Boolean) {
+        equalizerFocused.value = value
+        prefs.edit().putBoolean(KEY_EQ_FOCUSED, value).apply()
+    }
+
+    fun setEqualizerBalance(value: Float) {
+        val clamped = value.coerceIn(-1f, 1f)
+        equalizerBalance.value = clamped
+        prefs.edit().putFloat(KEY_EQ_BALANCE, clamped).apply()
+    }
+
+    /**
+     * Writes the manual tab's seven gains, and renames the preset row to suit.
+     *
+     * Stored as text rather than seven keys of their own so that a backup
+     * carries them: [exportPrefs] copies the preference file as it stands, and
+     * one string is one thing to keep in step rather than seven.
+     */
+    fun setEqualizerBands(values: List<Float>) {
+        val clamped = List(EqLayout.MANUAL_COUNT) {
+            values.getOrElse(it) { 0f }.coerceIn(-EqLayout.MANUAL_RANGE_DB, EqLayout.MANUAL_RANGE_DB)
+        }
+        equalizerBands.value = clamped
+        equalizerPreset.value = EqualizerPreset.matching(clamped)
+        prefs.edit().putString(KEY_EQ_BANDS, clamped.joinToString(",")).apply()
+    }
+
+    /** Applies a preset's curve. [EqualizerPreset.CUSTOM] carries none, so it does nothing. */
+    fun setEqualizerPreset(preset: EqualizerPreset) {
+        if (preset == EqualizerPreset.CUSTOM) return
+        setEqualizerBands(preset.bands)
+    }
+
+    private fun readEqualizerBands(): List<Float> {
+        val stored = prefs.getString(KEY_EQ_BANDS, null)
+            ?.split(",")
+            ?.mapNotNull { it.trim().toFloatOrNull() }
+            .orEmpty()
+        // Padded rather than rejected: a backup written by a build with a
+        // different number of bands should restore the ones it does have.
+        return List(EqLayout.MANUAL_COUNT) {
+            stored.getOrElse(it) { 0f }.coerceIn(-EqLayout.MANUAL_RANGE_DB, EqLayout.MANUAL_RANGE_DB)
+        }
+    }
+
     fun setPlaybackSpeed(value: Float) {
         playbackSpeed.value = value
         prefs.edit().putFloat(KEY_SPEED, value).apply()
@@ -929,6 +1129,11 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_DONT_REPEAT_SUGGESTIONS, value).apply()
     }
 
+    fun setPreferMusicOnly(value: Boolean) {
+        preferMusicOnly.value = value
+        prefs.edit().putBoolean(KEY_PREFER_MUSIC_ONLY, value).apply()
+    }
+
     fun setReduceDynamicBlur(value: Boolean) {
         reduceDynamicBlur.value = value
         if (value) highPerformanceMode.value = false
@@ -967,6 +1172,19 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_LYRICS_BLUR, value).apply()
     }
 
+    fun setLyricsOffsetMs(value: Int) {
+        val normalized = value.coerceIn(MIN_LYRICS_OFFSET_MS, MAX_LYRICS_OFFSET_MS)
+        if (lyricsOffsetMs.value == normalized) return
+        lyricsOffsetMs.value = normalized
+        prefs.edit().putInt(KEY_LYRICS_OFFSET_MS, normalized).apply()
+    }
+
+    /** Blank restores "follow the app language"; see [translationLanguage]. */
+    fun setTranslationLanguage(value: String) {
+        translationLanguage.value = value
+        prefs.edit().putString(KEY_TRANSLATION_LANGUAGE, value).apply()
+    }
+
     fun setSyncedLyrics(value: Boolean) {
         syncedLyrics.value = value
         prefs.edit().putBoolean(KEY_SYNCED_LYRICS, value).apply()
@@ -974,7 +1192,13 @@ object AppSettings {
 
     fun setLyricsSources(value: Set<LyricsSource>) {
         lyricsSources.value = value
-        prefs.edit().putString(KEY_LYRICS_SOURCES, value.joinToString(",") { it.name }).apply()
+        prefs.edit()
+            .putString(KEY_LYRICS_SOURCES, value.joinToString(",") { it.name })
+            // Everything that was on the list this choice was made from, so a
+            // later build can tell a source the user turned off from one they
+            // have never been shown. See [readLyricsSources].
+            .putString(KEY_LYRICS_SOURCES_SEEN, LyricsSource.entries.joinToString(",") { it.name })
+            .apply()
     }
 
     /**
@@ -983,14 +1207,43 @@ object AppSettings {
      * quietly, and the default when nothing has been saved is "all of them",
      * which a missing key and an empty set would otherwise be unable to tell
      * apart.
+     *
+     * A source *added* by an upgrade is enabled rather than left out. Absence
+     * from a saved list is a decision only about the sources that list was
+     * chosen from; a new one was never on it, so its absence says nothing, and
+     * treating it as "off" would ship a source nobody could discover without
+     * first going and looking for it. [KEY_LYRICS_SOURCES_SEEN] is what makes
+     * the two cases distinguishable — before it existed, [LEGACY_SOURCES]
+     * stands in as the list of everything there was to have an opinion about.
      */
     private fun readLyricsSources(): Set<LyricsSource> {
         val stored = prefs.getString(KEY_LYRICS_SOURCES, null)
             ?: return LyricsSource.entries.toSet()
-        return stored.split(",")
-            .mapNotNull { name -> LyricsSource.entries.firstOrNull { it.name == name } }
-            .toSet()
+        val chosen = stored.split(",").toSources()
+        val seen = prefs.getString(KEY_LYRICS_SOURCES_SEEN, null)
+            ?.split(",")?.toSources()
+            ?: LEGACY_SOURCES
+        return chosen + LyricsSource.entries.filter { it !in seen }
     }
+
+    private fun List<String>.toSources(): Set<LyricsSource> =
+        mapNotNull { name -> LyricsSource.entries.firstOrNull { it.name == name } }.toSet()
+
+    /**
+     * The sources that existed before [KEY_LYRICS_SOURCES_SEEN] was written.
+     * Fixed forever: it describes what an old build could have saved, so it
+     * does not grow when [LyricsSource] does.
+     */
+    private val LEGACY_SOURCES = setOf(
+        LyricsSource.LYRICS_PLUS,
+        LyricsSource.PAXSENIX,
+        LyricsSource.BETTER_LYRICS,
+        LyricsSource.SIMP_MUSIC,
+        LyricsSource.KUGOU,
+        LyricsSource.LRCLIB,
+        LyricsSource.MUSIXMATCH,
+        LyricsSource.GENIUS,
+    )
 
     fun setLyricsSourceOrder(value: List<LyricsSource>) {
         lyricsSourceOrder.value = value
@@ -1016,9 +1269,11 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_PRIORITIZE_SYLLABLE_SYNC, value).apply()
     }
 
-    fun setShowLyricsLogs(value: Boolean) {
-        showLyricsLogs.value = value
-        prefs.edit().putBoolean(KEY_SHOW_LYRICS_LOGS, value).apply()
+    fun setPaxSenixApiKey(value: String) {
+        val normalized = com.music.bitchord.data.lyrics.normalizePaxSenixApiKey(value)
+        paxSenixApiKey.value = normalized
+        prefs.edit().putString(KEY_PAXSENIX_API_KEY, normalized).apply()
+        com.music.bitchord.data.lyrics.PaxSenix.setApiKey(normalized)
     }
 
     /**
@@ -1030,7 +1285,6 @@ object AppSettings {
         setLyricsSources(LyricsSource.entries.toSet())
         setLyricsSourceOrder(LyricsSource.entries)
         setPrioritizeSyllableSync(false)
-        setShowLyricsLogs(false)
     }
 
     fun setAnimatedCanvas(value: Boolean) {
@@ -1257,6 +1511,14 @@ object AppSettings {
         prefs.edit().putString(KEY_LIBRARY_SORT, value.name).apply()
     }
 
+    fun setDetailSongSort(browseId: String, value: SongSort) {
+        detailSongSorts.value = detailSongSorts.value + (browseId to value)
+        prefs.edit().putString(
+            KEY_DETAIL_SONG_SORTS,
+            detailSongSorts.value.entries.joinToString(",") { (id, sort) -> "$id=${sort.name}" },
+        ).apply()
+    }
+
     fun setLocalMusicViewType(value: LibraryViewType) {
         localMusicViewType.value = value
         prefs.edit().putString(KEY_LOCAL_MUSIC_VIEW_TYPE, value.name).apply()
@@ -1265,6 +1527,11 @@ object AppSettings {
     fun setDownloadedMusicViewType(value: LibraryViewType) {
         downloadedMusicViewType.value = value
         prefs.edit().putString(KEY_DOWNLOADED_MUSIC_VIEW_TYPE, value.name).apply()
+    }
+
+    fun setHomeRecentsViewType(value: LibraryViewType) {
+        homeRecentsViewType.value = value
+        prefs.edit().putString(KEY_HOME_RECENTS_VIEW_TYPE, value.name).apply()
     }
 
     fun setLocalMusicFolderUri(value: String) {
@@ -1301,6 +1568,17 @@ object AppSettings {
         prefs.edit().putString(KEY_PINNED_PLAYLISTS, updated.joinToString(",")).apply()
         return browseId in updated
     }
+
+    private fun readDetailSongSorts(): Map<String, SongSort> =
+        prefs.getString(KEY_DETAIL_SONG_SORTS, null)
+            ?.split(",")
+            ?.mapNotNull { entry ->
+                val id = entry.substringBefore('=', "")
+                val sort = SongSort.entries.firstOrNull { it.name == entry.substringAfter('=', "") }
+                if (id.isBlank() || sort == null) null else id to sort
+            }
+            ?.toMap()
+            ?: emptyMap()
 
     private fun readPinnedPlaylists(): List<String> {
         val stored = prefs.getString(KEY_PINNED_PLAYLISTS, null) ?: return emptyList()
@@ -1377,6 +1655,7 @@ object AppSettings {
         KEY_LASTFM_SECRET,
         KEY_LISTENBRAINZ_TOKEN,
         KEY_SPOTIFY_SPDC_TOKEN,
+        KEY_PAXSENIX_API_KEY,
     )
 
     /**
@@ -1401,6 +1680,13 @@ object AppSettings {
     const val DEFAULT_CACHE_LIMIT_BYTES = 512L * 1024 * 1024
     const val MAX_CACHE_LIMIT_BYTES = 10L * 1024 * 1024 * 1024
 
+    const val MIN_LYRICS_OFFSET_MS = -5_000
+    const val MAX_LYRICS_OFFSET_MS = 5_000
+
+    const val DEFAULT_UPGRADE_LENGTH_SLACK_SECONDS = 3
+    const val MIN_UPGRADE_LENGTH_SLACK_SECONDS = 0
+    const val MAX_UPGRADE_LENGTH_SLACK_SECONDS = 10
+
     private const val DEFAULT_PERFORMANCE_REFRESH_RATE = 120
 
     private fun normalizePerformanceRefreshRate(value: Int): Int =
@@ -1409,6 +1695,7 @@ object AppSettings {
     private const val KEY_QUALITY_LEGACY = "audio_quality"
     private const val KEY_QUALITY_WIFI = "audio_quality_wifi"
     private const val KEY_QUALITY_CELLULAR = "audio_quality_cellular"
+    private const val KEY_UPGRADE_LENGTH_SLACK_SECONDS = "upgrade_length_slack_seconds"
     private const val KEY_QUALITY_DOWNLOAD = "audio_quality_download"
     private const val KEY_WIFI_ONLY_DOWNLOADS = "wifi_only_downloads"
     private const val KEY_EXPORT_DOWNLOADS = "export_downloads"
@@ -1424,6 +1711,13 @@ object AppSettings {
     private const val KEY_PREFER_USB_DAC = "prefer_usb_dac"
     private const val KEY_DOLBY_ATMOS = "dolby_atmos"
     private const val KEY_SPATIAL_AUDIO = "spatial_audio"
+    private const val KEY_EQ_ENABLED = "equalizer_enabled"
+    private const val KEY_EQ_MODE = "equalizer_mode"
+    private const val KEY_EQ_TONE_X = "equalizer_tone_x"
+    private const val KEY_EQ_TONE_Y = "equalizer_tone_y"
+    private const val KEY_EQ_FOCUSED = "equalizer_focused"
+    private const val KEY_EQ_BALANCE = "equalizer_balance"
+    private const val KEY_EQ_BANDS = "equalizer_bands"
     private const val KEY_SPEED = "playback_speed"
     private const val KEY_THEME = "theme_mode"
     private const val KEY_AUTOPLAY = "autoplay"
@@ -1438,25 +1732,31 @@ object AppSettings {
     private const val KEY_HIDE_VOLUME_BAR = "hide_volume_bar"
     private const val KEY_SWIPE_TO_PLAY_NEXT = "swipe_to_play_next"
     private const val KEY_DONT_REPEAT_SUGGESTIONS = "dont_repeat_suggestions"
+    private const val KEY_PREFER_MUSIC_ONLY = "prefer_music_only"
     private const val KEY_REDUCE_BLUR = "reduce_dynamic_blur"
     private const val KEY_LIQUID_GLASS = "liquid_glass"
     private const val KEY_LYRICS_BLUR = "lyrics_blur"
+    private const val KEY_LYRICS_OFFSET_MS = "lyrics_offset_ms"
+    private const val KEY_TRANSLATION_LANGUAGE = "translation_language"
     private const val KEY_ANIMATED_CANVAS = "animated_canvas"
     private const val KEY_CANVAS_OVER_CELLULAR = "canvas_over_cellular"
     private const val KEY_FULL_BLEED_ARTWORK = "full_bleed_artwork"
     private const val KEY_LEGACY_MESH_GRADIENT = "legacy_mesh_gradient"
     private const val KEY_SYNCED_LYRICS = "synced_lyrics"
     private const val KEY_LYRICS_SOURCES = "lyrics_sources"
+    private const val KEY_LYRICS_SOURCES_SEEN = "lyrics_sources_seen"
     private const val KEY_LYRICS_SOURCE_ORDER = "lyrics_source_order"
     private const val KEY_PRIORITIZE_SYLLABLE_SYNC = "prioritize_syllable_sync"
-    private const val KEY_SHOW_LYRICS_LOGS = "show_lyrics_logs"
+    private const val KEY_PAXSENIX_API_KEY = "paxsenix_api_key"
     private const val KEY_REPLAY_GENRES = "replay_genres"
     private const val KEY_FILTER_NON_MUSIC_AUDIO = "filter_non_music_audio"
     private const val KEY_LOCAL_MUSIC_SORT = "local_music_sort"
     private const val KEY_DOWNLOADED_MUSIC_SORT = "downloaded_music_sort"
     private const val KEY_LIBRARY_SORT = "library_sort"
+    private const val KEY_DETAIL_SONG_SORTS = "detail_song_sorts"
     private const val KEY_LOCAL_MUSIC_VIEW_TYPE = "local_music_view_type"
     private const val KEY_DOWNLOADED_MUSIC_VIEW_TYPE = "downloaded_music_view_type"
+    private const val KEY_HOME_RECENTS_VIEW_TYPE = "home_recents_view_type"
     private const val KEY_LOCAL_MUSIC_FOLDER_URI = "local_music_folder_uri"
     private const val KEY_PINNED_PLAYLISTS = "pinned_playlists"
 
