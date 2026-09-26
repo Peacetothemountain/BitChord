@@ -2802,7 +2802,6 @@ fun NowPlayingScreen(
                         InlineQueue(
                             queue = queue,
                             currentIndex = queueIndex,
-                            isPlaying = isPlaying,
                             autoplayEnabled = autoplayEnabled,
                             controlsLocked = controlsLocked,
                             onJumpTo = onJumpTo,

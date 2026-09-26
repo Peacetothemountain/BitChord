@@ -766,7 +766,7 @@ private fun InlineQueueRow(
         if (isCurrent) {
             com.music.bitchord.ui.components.ExpressivePlayingEqualizer(
                 modifier = Modifier.size(18.dp),
-                color = Color.White,
+                tint = Color.White,
             )
             Spacer(Modifier.width(10.dp))
         }
