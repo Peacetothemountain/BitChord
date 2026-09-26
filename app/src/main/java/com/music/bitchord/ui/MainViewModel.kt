@@ -52,7 +52,9 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -64,6 +66,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -72,8 +75,17 @@ import com.music.bitchord.data.sources.SourceRegistry
 import com.music.bitchord.data.sources.SourceResolver
 import com.music.bitchord.data.sources.TrackMatcher
 import com.music.bitchord.playback.StreamChoice
-import java.util.concurrent.atomic.AtomicLong
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
+
+/** What the current track's provider picker already knows without another request. */
+enum class LyricsProviderState {
+    NOT_FETCHED,
+    FETCHING,
+    FOUND,
+    NOT_FOUND,
+}
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -245,6 +257,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val lyricsChecked: StateFlow<Boolean> = _lyricsChecked.asStateFlow()
 
     private var lyricsJob: Job? = null
+    private val manualLyricsJobs = mutableMapOf<LyricsSource, Job>()
+
+    private val _lyricsProviderStates = MutableStateFlow(
+        LyricsSource.entries.associateWith { LyricsProviderState.NOT_FETCHED },
+    )
+    val lyricsProviderStates: StateFlow<Map<LyricsSource, LyricsProviderState>> =
+        _lyricsProviderStates.asStateFlow()
+
+    /** Completed hits are retained for the playing track so choosing one is instant. */
+    private val lyricsProviderResults = ConcurrentHashMap<LyricsSource, LyricsRepository.Result>()
+
+    private data class LyricsRequest(
+        val videoId: String,
+        val title: String,
+        val artist: String,
+        val durationMs: Long,
+        val album: String?,
+    )
+
+    private var currentLyricsRequest: LyricsRequest? = null
+    private var lyricsGeneration = 0L
+    private var selectedLyricsSource: LyricsSource? = null
 
     /**
      * What the loaded lyrics are for. Both the track *and* the settings that
@@ -288,6 +322,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // pausing is when the duration is most likely to arrive a frame late.
         if (localUri == null && durationMs <= 0L) return
         lyricsFor = key
+        lyricsGeneration += 1
+        val generation = lyricsGeneration
+        currentLyricsRequest = LyricsRequest(videoId, title, artist, durationMs, album)
+        selectedLyricsSource = null
+        manualLyricsJobs.values.forEach(Job::cancel)
+        manualLyricsJobs.clear()
+        lyricsProviderResults.clear()
+        _lyricsProviderStates.value =
+            LyricsSource.entries.associateWith { LyricsProviderState.NOT_FETCHED }
         _lyrics.value = null
         _lyricsSource.value = null
         lyricsJob?.cancel()
@@ -322,11 +365,108 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val found = LyricsRepository.lyrics(
                 videoId, title, artist, durationMs, album, sources,
                 AppSettings.lyricsSourceOrder.value, AppSettings.prioritizeSyllableSync.value,
+                onSourceStarted = { source -> providerStarted(generation, source) },
+                onSourceResult = { source, result ->
+                    providerFinished(generation, source, result)
+                },
+                onSourceCancelled = { source -> providerCancelled(generation, source) },
             )
-            _lyrics.value = found?.lines
-            _lyricsSource.value = found?.source
+            val selected = selectedLyricsSource?.let(lyricsProviderResults::get) ?: found
+            _lyrics.value = selected?.lines
+            _lyricsSource.value = selected?.source
             _lyricsChecked.value = true
         }
+    }
+
+    /**
+     * Selects a provider from the player drawer. Completed hits are applied
+     * from memory; misses are inert; only an untouched provider goes online.
+     */
+    fun selectLyricsProvider(source: LyricsSource) {
+        val request = currentLyricsRequest ?: return
+        when (_lyricsProviderStates.value[source]) {
+            LyricsProviderState.FOUND -> {
+                selectedLyricsSource = source
+                lyricsProviderResults[source]?.let(::showLyricsResult)
+            }
+            LyricsProviderState.FETCHING -> {
+                // Apply it as soon as the already-running automatic attempt completes.
+                selectedLyricsSource = source
+            }
+            LyricsProviderState.NOT_FETCHED, null -> {
+                selectedLyricsSource = source
+                fetchLyricsProvider(request, lyricsGeneration, source)
+            }
+            LyricsProviderState.NOT_FOUND -> Unit
+        }
+    }
+
+    private fun fetchLyricsProvider(
+        request: LyricsRequest,
+        generation: Long,
+        source: LyricsSource,
+    ) {
+        if (manualLyricsJobs[source]?.isActive == true) return
+        manualLyricsJobs[source] = viewModelScope.launch {
+            LyricsRepository.lyrics(
+                videoId = request.videoId,
+                title = request.title,
+                artist = request.artist,
+                durationMs = request.durationMs,
+                album = request.album,
+                sources = setOf(source),
+                order = listOf(source),
+                prioritizeSyllableSync = false,
+                onSourceStarted = { provider -> providerStarted(generation, provider) },
+                onSourceResult = { provider, result ->
+                    providerFinished(generation, provider, result)
+                },
+                onSourceCancelled = { provider -> providerCancelled(generation, provider) },
+            )
+        }
+    }
+
+    private fun providerStarted(generation: Long, source: LyricsSource) {
+        if (generation != lyricsGeneration) return
+        _lyricsProviderStates.update { it + (source to LyricsProviderState.FETCHING) }
+    }
+
+    private fun providerFinished(
+        generation: Long,
+        source: LyricsSource,
+        result: LyricsRepository.Result?,
+    ) {
+        if (generation != lyricsGeneration) return
+        if (result == null) {
+            _lyricsProviderStates.update { it + (source to LyricsProviderState.NOT_FOUND) }
+            return
+        }
+        lyricsProviderResults[source] = result
+        _lyricsProviderStates.update { it + (source to LyricsProviderState.FOUND) }
+        if (selectedLyricsSource == source) showLyricsResult(result)
+    }
+
+    private fun providerCancelled(generation: Long, source: LyricsSource) {
+        if (generation != lyricsGeneration) return
+        _lyricsProviderStates.update { states ->
+            if (states[source] == LyricsProviderState.FETCHING) {
+                states + (source to LyricsProviderState.NOT_FETCHED)
+            } else {
+                states
+            }
+        }
+        // A tap may have selected a provider while the priority race was still
+        // using it. If that race then cancels the loser, honour the tap with a
+        // dedicated request instead of leaving the row stuck at "Fetching".
+        if (selectedLyricsSource == source) {
+            currentLyricsRequest?.let { fetchLyricsProvider(it, generation, source) }
+        }
+    }
+
+    private fun showLyricsResult(result: LyricsRepository.Result) {
+        _lyrics.value = result.lines
+        _lyricsSource.value = result.source
+        _lyricsChecked.value = true
     }
 
     private val _account = MutableStateFlow<Account?>(null)
@@ -510,14 +650,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     )
 
     /** As [toggleLike], for the thumb-down. */
-    fun toggleDislike(videoId: String) = setLike(
-        videoId,
-        if (likeStatusOf(videoId) == LikeStatus.DISLIKE) {
-            LikeStatus.INDIFFERENT
-        } else {
-            LikeStatus.DISLIKE
-        },
-    )
+    fun toggleDislike(videoId: String): LikeStatus? {
+        if (!requireSignIn()) return null
+        val previous = likeStatusOf(videoId)
+        setLike(
+            videoId,
+            if (previous == LikeStatus.DISLIKE) {
+                LikeStatus.INDIFFERENT
+            } else {
+                LikeStatus.DISLIKE
+            },
+        )
+        return previous
+    }
 
     /**
      * Saves the album or playlist [browseId] to the library, or takes it out.
@@ -1082,6 +1227,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         viewModelScope.launch {
+            AppSettings.webdavUrl.drop(1).collect {
+                reloadRemoteDetail(com.music.bitchord.data.webdav.WebDavConfig.BROWSE_ID)
+            }
+        }
+        viewModelScope.launch {
+            combine(
+                AppSettings.smbHost,
+                AppSettings.smbShare,
+                AppSettings.smbBasePath,
+                AppSettings.smbUsername,
+                AppSettings.smbPassword,
+            ) { fields -> fields.toList() }
+                .drop(1)
+                .debounce(300)
+                .collect { reloadRemoteDetail(com.music.bitchord.data.smb.SmbConfig.BROWSE_ID) }
+        }
+        viewModelScope.launch {
             // A leftover APK only means "Install Now" for the session that
             // downloaded it — see AppUpdateChecker.clearCache.
             AppUpdateChecker.clearCache(getApplication())
@@ -1551,6 +1713,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _suggestions.value = emptyList()
             _typeaheadResults.value = emptyList()
             _results.value = null
+            // The list is about to switch from search results to recent
+            // searches (or the empty state) — without this it can keep
+            // whatever scroll offset the results list was left at, landing
+            // the new, much shorter list somewhere other than the top.
+            _searchScrollReset.value += 1
             return
         }
         // Reset the submission gate so typeahead pipelines fire again.
@@ -1898,7 +2065,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private companion object {
+    companion object {
         /**
          * How long a keystroke waits before the typeahead is asked about it.
          *
@@ -1959,6 +2126,52 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
          * the page, its refresh, and the long-press menu that queues it without
          * opening it.
          */
+
+        fun browseTypeOf(browseId: String, fallback: BrowseType = BrowseType.OTHER): BrowseType = when {
+            browseId.startsWith(Downloads.PLAYLIST_PREFIX) -> BrowseType.PLAYLIST
+            browseId.startsWith("UC") -> BrowseType.ARTIST
+            browseId.startsWith("MPREb") || browseId.startsWith("VLOLAK") || browseId.startsWith("OLAK") -> BrowseType.ALBUM
+            browseId.startsWith("VL") || browseId.startsWith("PL") -> BrowseType.PLAYLIST
+            else -> fallback
+        }
+    }
+
+    /**
+     * A remote file library behind a `local:` page: how to list it and what
+     * an empty listing says. One entry per library keeps the detail loader,
+     * the refresher and the queue collector from each repeating the switch —
+     * a third library adds one line here and nothing anywhere else.
+     */
+    private data class RemoteLibrary(
+        val emptyRes: Int,
+        val songs: suspend () -> List<Song>,
+    )
+
+    private fun remoteLibrary(browseId: String): RemoteLibrary? = when (browseId) {
+        com.music.bitchord.data.webdav.WebDavConfig.BROWSE_ID ->
+            RemoteLibrary(
+                R.string.webdav_empty,
+                com.music.bitchord.data.webdav.WebDavRepository::getSongs,
+            )
+        com.music.bitchord.data.smb.SmbConfig.BROWSE_ID ->
+            RemoteLibrary(
+                R.string.smb_empty,
+                com.music.bitchord.data.smb.SmbRepository::getSongs,
+            )
+        else -> null
+    }
+
+    private suspend fun remoteSongsState(remote: RemoteLibrary): UiState<List<Song>> =
+        com.music.bitchord.data.remote.RemoteListing.state(runCatching { remote.songs() }, text(remote.emptyRes))
+
+    /**
+     * Re-reads an open remote-library page after its server settings change.
+     * A no-op when the page isn't open — the next visit lists fresh anyway.
+     */
+    private fun reloadRemoteDetail(browseId: String) {
+        if (_detailStack.value.any { page -> page.browseId == browseId }) {
+            reloadLocalDetail(browseId)
+        }
     }
 
     fun openDetail(
@@ -1968,6 +2181,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         thumbnailUrl: String? = null,
         type: BrowseType = BrowseType.OTHER,
     ) {
+        // A fast double tap used to push two identical loading pages and launch
+        // two identical browse requests. Besides wasting the connection, both
+        // completions then raced to update every matching browse id in the
+        // stack. The page is pushed synchronously, so this closes that window
+        // without suppressing a deliberate revisit after the first page loads.
+        if (_detailStack.value.lastOrNull()?.let {
+                it.browseId == browseId && it.songs is UiState.Loading
+            } == true
+        ) return
         val resolved = browseTypeOf(browseId, type)
         _detailStack.value += DetailPage(
             browseId = browseId,
@@ -2006,7 +2228,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             var monthlyListenerCount: String? = null
             /** Whether this artist is subscribed to — see [DetailPage.subscription]. */
             var subscription: SubscriptionState? = null
+            val remote = remoteLibrary(browseId)
             val state = when {
+                remote != null -> remoteSongsState(remote)
                 Downloads.recordIdOf(browseId) != null -> {
                     val songs = downloadedPlaylist(browseId)
                     if (songs.isEmpty()) UiState.Error(text(R.string.downloaded_playlist_empty))
@@ -2114,7 +2338,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun reloadLocalDetail(browseId: String) {
         viewModelScope.launch {
             val context = getApplication<Application>()
+            val remote = remoteLibrary(browseId)
             val state: UiState<List<Song>> = when {
+                remote != null -> remoteSongsState(remote)
                 Downloads.recordIdOf(browseId) != null -> {
                     val songs = downloadedPlaylist(browseId)
                     if (songs.isEmpty()) UiState.Error(text(R.string.downloaded_playlist_empty))
@@ -2148,10 +2374,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * The tracks of the downloaded playlist [browseId] names that are still on
      * disk, in the order the playlist had.
      *
-     * Reads the whole Downloads folder rather than the record's own uris,
-     * because that read is what fills in an album tag the record never carried
-     * and what collapses a music video's two ids down to the one file it saved —
-     * see [Downloads.collectionsAmong], of which this is a single-playlist view.
+     * The download record already names those files, so opening this page must
+     * not scan every unrelated download first. [Downloads.getCollectionSongs]
+     * verifies only this collection and still collapses aliases that point to
+     * the same saved file.
      *
      * Empty is the honest answer for a record whose files have all been deleted
      * from under it, and callers turn that into an empty-state message rather than
@@ -2159,8 +2385,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     private suspend fun downloadedPlaylist(browseId: String): List<Song> {
         val id = Downloads.recordIdOf(browseId) ?: return emptyList()
-        val folder = LocalMediaRepository.getDownloadedSongs(getApplication())
-        return Downloads.collectionsAmong(folder).firstOrNull { it.id == id }?.songs.orEmpty()
+        return Downloads.getCollectionSongs(getApplication(), id)
     }
 
     /**
@@ -2180,6 +2405,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     private fun fillIn(browseId: String, token: String, artworkFallback: String?) {
         viewModelScope.launch {
+            // Publish and draw the first response before spending the shared
+            // connection on page two. On a long playlist the continuation can
+            // otherwise start in the same main-loop turn as the state update,
+            // making a ready first screen feel as if it were still loading.
+            delay(150)
             var next: String? = token
             while (next != null) {
                 val fetched = YtMusicRepository.moreSongs(next).getOrNull() ?: return@launch
@@ -2233,15 +2463,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * before offering to queue what is behind it — an artist is not a running
      * order, so it gets no queue actions.
      */
-    fun browseTypeOf(browseId: String, fallback: BrowseType = BrowseType.OTHER): BrowseType = when {
-        // Not one of YouTube's, and the only one of these that says outright what
-        // it is rather than being read off a prefix convention.
-        browseId.startsWith(Downloads.PLAYLIST_PREFIX) -> BrowseType.PLAYLIST
-        browseId.startsWith("UC") -> BrowseType.ARTIST
-        browseId.startsWith("MPREb") -> BrowseType.ALBUM
-        browseId.startsWith("VL") || browseId.startsWith("PL") -> BrowseType.PLAYLIST
-        else -> fallback
-    }
+    fun browseTypeOf(browseId: String, fallback: BrowseType = BrowseType.OTHER): BrowseType =
+        Companion.browseTypeOf(browseId, fallback)
 
     /**
      * Every track behind an album or playlist, handed to [onResult] once it is
@@ -2263,7 +2486,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         viewModelScope.launch {
             val context = getApplication<Application>()
+            val remote = remoteLibrary(browseId)
             val result = when {
+                remote != null -> runCatching {
+                    remote.songs().ifEmpty { error(text(remote.emptyRes)) }
+                }
                 Downloads.recordIdOf(browseId) != null -> runCatching {
                     downloadedPlaylist(browseId).ifEmpty {
                         error(text(R.string.downloaded_playlist_empty))
@@ -2343,66 +2570,117 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * reported, remember it, and refetch everything that belongs to a listener
      * — is the same work either way.
      */
-    fun onWebSession(session: CapturedSession, mode: WebSessionMode) {
-        val accountId = sessionId(session.cookie, session.dataSyncId)
-        val previous = authStore.sessions.firstOrNull { it.accountId == accountId }
-        val profile = YouTubeProfile(
-            profileId = profileId(session.pageId, session.dataSyncId, previous?.name ?: "Personal"),
-            name = previous?.profiles?.firstOrNull { it.pageId == session.pageId }?.name ?: "Personal",
-            pageId = session.pageId, dataSyncId = session.dataSyncId, authUser = session.authUser,
-            isBrandAccount = session.pageId != null,
-        )
-        // A profile captured before its channel existed carries a provisional,
-        // name-hash id (see profileId()) since Google reports no pageId/dataSyncId
-        // for it yet. Once this same login reports real ids, that placeholder is
-        // the same identity under a new id — drop it rather than keep both.
-        val hasRealIdentity = profile.pageId != null || profile.dataSyncId != null
-        val profiles = (previous?.profiles.orEmpty().filterNot {
-            it.profileId == profile.profileId || (hasRealIdentity && it.profileId.startsWith("profile:"))
-        } + profile)
-        val stored = GoogleAccountSession(
-            accountId = accountId, cookie = session.cookie, name = previous?.name.orEmpty(),
-            email = previous?.email.orEmpty(), profiles = profiles, activeProfileId = profile.profileId,
-        )
-        authStore.upsertSession(stored)
-        _googleAccounts.value = authStore.sessions
-        _activeAccountId.value = accountId
-        _activeProfileId.value = profile.profileId
-        _channels.value = emptyList()
-        authStore.cookie = session.cookie // legacy compatibility only
-        // Assigned before the scope is adopted, never after: setting a cookie
-        // that differs from the last one clears the scope and the channel with
-        // it, which would throw away the identity just captured.
-        Innertube.cookie = session.cookie
-        Innertube.adoptSessionScope(
-            pageId = session.pageId,
-            dataSyncId = session.dataSyncId,
-            authUser = session.authUser,
-            visitorData = session.visitorData,
-            clientVersion = session.clientVersion,
-            loggedIn = session.loggedIn,
-        )
-
-        if (session.loggedIn && (session.pageId != null || session.dataSyncId != null)) {
-            // Persisted so the choice survives a restart: the shell fetched on
-            // the next launch reports the default channel, and without this the
-            // app would quietly drift back to it.
-            Innertube.selectChannel(session.pageId, session.dataSyncId, session.authUser)
-            _selectedChannelKey.value = session.pageId ?: session.dataSyncId
-            _selectedChannelName.value = profile.name
+    fun onWebSession(
+        session: CapturedSession,
+        mode: WebSessionMode,
+        onComplete: (Boolean) -> Unit = {},
+    ) {
+        if (!session.loggedIn) {
+            onComplete(false)
+            return
         }
+        val oldAccountId = _activeAccountId.value
+        val oldProfileId = _activeProfileId.value
+        viewModelScope.launch {
+            // Validate the exact cookie/profile pair before writing any of it.
+            // The old implementation persisted first and unconditionally set
+            // signedIn=true; a half-finished channel chooser therefore became
+            // a durable broken "Personal" account.
+            Innertube.cookie = session.cookie
+            Innertube.adoptSessionScope(
+                pageId = session.pageId,
+                dataSyncId = session.dataSyncId,
+                authUser = session.authUser,
+                visitorData = session.visitorData,
+                clientVersion = session.clientVersion,
+                loggedIn = true,
+            )
+            Innertube.selectChannel(session.pageId, session.dataSyncId, session.authUser)
 
-        // Every "this track can't be played" the resolver recorded under the
-        // previous session was reached under different rules. An age-gated
-        // track is the whole point of signing in, and it is the one verdict a
-        // session overturns — so a listener who signs in to play a track must
-        // not spend the next ten minutes being told it still cannot be played.
-        StreamResolver.onSessionChanged()
-        val wasSignedIn = _signedIn.value
-        _signedIn.value = true
-        if (wasSignedIn) clearListenerState()
-        reloadForAccount()
-        loadChannels(force = true)
+            val account = withTimeoutOrNull(20_000L) {
+                var result = YtMusicRepository.account()
+                if (result.isFailure) {
+                    delay(750L)
+                    result = YtMusicRepository.account()
+                }
+                result.getOrNull()
+            }
+            if (account == null) {
+                restoreActiveSession(oldAccountId, oldProfileId)
+                onComplete(false)
+                return@launch
+            }
+
+            // A channel switch is another identity under the same Google
+            // login, never a new Google account. For a fresh sign-in, matching
+            // a non-empty email upgrades the existing entry instead of adding
+            // a duplicate after cookies rotate.
+            val accountId = when (mode) {
+                WebSessionMode.SWITCH_CHANNEL -> oldAccountId
+                WebSessionMode.SIGN_IN -> authStore.sessions.firstOrNull {
+                    account.email.isNotBlank() && it.email.equals(account.email, ignoreCase = true)
+                }?.accountId ?: sessionId(session.cookie, null)
+            }
+            if (accountId == null) {
+                restoreActiveSession(oldAccountId, oldProfileId)
+                onComplete(false)
+                return@launch
+            }
+            val previous = authStore.sessions.firstOrNull { it.accountId == accountId }
+            val selectedProfileId = profileId(session.pageId, session.dataSyncId, account.name)
+            val profile = YouTubeProfile(
+                profileId = selectedProfileId,
+                name = account.name,
+                handle = account.email,
+                avatar = account.thumbnailUrl,
+                pageId = session.pageId,
+                dataSyncId = session.dataSyncId,
+                authUser = session.authUser,
+                isBrandAccount = session.pageId != null,
+            )
+            val hasRealIdentity = profile.pageId != null || profile.dataSyncId != null
+            val profiles = previous?.profiles.orEmpty().filterNot { known ->
+                known.profileId == profile.profileId ||
+                    (hasRealIdentity && known.profileId.startsWith("profile:"))
+            } + profile
+            val stored = GoogleAccountSession(
+                accountId = accountId,
+                cookie = session.cookie,
+                name = account.name,
+                email = account.email,
+                profiles = profiles,
+                activeProfileId = profile.profileId,
+            )
+
+            val wasSignedIn = _signedIn.value
+            if (wasSignedIn) cacheCurrentListener()
+            authStore.upsertSession(stored)
+            authStore.cookie = session.cookie // legacy compatibility only
+            _googleAccounts.value = authStore.sessions
+            _activeAccountId.value = accountId
+            _activeProfileId.value = profile.profileId
+            _selectedChannelKey.value = profile.profileId
+            _selectedChannelName.value = account.name
+            _account.value = account
+            _channels.value = emptyList()
+            _signedIn.value = true
+
+            // Every resolver verdict and personalised page belongs to the
+            // identity that was active before validation succeeded.
+            StreamResolver.onSessionChanged()
+            if (wasSignedIn) clearListenerState()
+            reloadForAccount()
+            loadChannels(force = true)
+            onComplete(true)
+        }
+    }
+
+    /** Put request signing back exactly as it was after a rejected candidate. */
+    private fun restoreActiveSession(accountId: String?, selectedProfileId: String?) {
+        val account = authStore.sessions.firstOrNull { it.accountId == accountId }
+        val profile = account?.profiles?.firstOrNull { it.profileId == selectedProfileId }
+        Innertube.cookie = account?.cookie
+        Innertube.selectChannel(profile?.pageId, profile?.dataSyncId, profile?.authUser)
     }
 
     /** Selects an identity without ever allowing a response to replace it. */

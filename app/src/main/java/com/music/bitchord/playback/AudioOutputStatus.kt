@@ -64,6 +64,21 @@ object AudioOutputStatus {
         val bufferSize: Int? = null,
         val decoderOutputEncoding: String? = null,
         val dspFormat: String = "Float32",
+        /**
+         * Whether the DSP chain can run on the playing track at all.
+         *
+         * False only on the sink's legacy path, which a stream that was never
+         * decoded to linear PCM takes — a passthrough or offload bitstream.
+         * There is nothing to filter there, so the equaliser and spatial audio
+         * are genuinely inert, and the equaliser screen says so.
+         *
+         * Notably *not* tied to the output encoding. The DSP chain runs inside
+         * `PrecisionAudioSink`, upstream of Media3's own processor list, so a
+         * float AudioTrack makes no difference to it — an older readout keyed
+         * off exactly that and spent months telling people their equaliser was
+         * off while it was working.
+         */
+        val dspAvailable: Boolean = true,
         val directUsbProbe: DirectUsbProbeResult? = null,
         val directSupport: DirectAudioProbe.DirectSupport? = null,
         val directPlaybackSupported: Boolean = false,
@@ -75,7 +90,33 @@ object AudioOutputStatus {
         val halFormat: String? = null,
         val usbEndpointFormat: String? = null,
         val bluetoothTelemetry: BluetoothTelemetry? = null,
+        /**
+         * The Bluetooth transport profile the active sink actually uses ("A2DP",
+         * "LE Audio"), or null when the route is not Bluetooth. [routeKind] alone
+         * cannot answer this: BLUETOOTH covers classic A2DP and every LE Audio
+         * device type, so naming the profile off the route kind mislabels LE
+         * Audio earbuds and hearing aids as A2DP.
+         */
+        val bluetoothProfile: String? = null,
         val negotiationResult: OutputNegotiationResult? = null,
+        /**
+         * Whether the output encoding carries the decoder's samples intact.
+         *
+         * Only the encoding half of bit-exactness: it says the trip from
+         * `PcmBoundary` to AudioTrack loses nothing, not that the listener has
+         * every DSP stage switched off. A 24-bit stream on a route that will
+         * not open a float track is false here, with [outputExactDetail]
+         * naming why. See `PrecisionAudioSink.publishOutputExactness`.
+         */
+        val outputExact: Boolean = false,
+        val outputExactDetail: String? = null,
+        /**
+         * Gain loudness normalization is applying to the playing track, in dB,
+         * or null when it is off or YouTube offered no figure for this track.
+         */
+        val loudnessGainDb: Float? = null,
+        /** YouTube's own normalization figure for the playing track, in dB, when known. */
+        val loudnessLufs: Float? = null,
     ) {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
@@ -99,7 +140,8 @@ object AudioOutputStatus {
                 decoderName == other.decoderName &&
                 bufferSize == other.bufferSize &&
                 decoderOutputEncoding == other.decoderOutputEncoding &&
-                dspFormat == other.dspFormat &&
+                dspFormat == other.dspFormat &&
+                dspAvailable == other.dspAvailable &&
                 directUsbProbe == other.directUsbProbe &&
                 directSupport == other.directSupport &&
                 directPlaybackSupported == other.directPlaybackSupported &&
@@ -111,7 +153,12 @@ object AudioOutputStatus {
                 halFormat == other.halFormat &&
                 usbEndpointFormat == other.usbEndpointFormat &&
                 bluetoothTelemetry == other.bluetoothTelemetry &&
-                negotiationResult == other.negotiationResult
+                bluetoothProfile == other.bluetoothProfile &&
+                negotiationResult == other.negotiationResult &&
+                outputExact == other.outputExact &&
+                outputExactDetail == other.outputExactDetail &&
+                loudnessGainDb == other.loudnessGainDb &&
+                loudnessLufs == other.loudnessLufs
         }
 
         override fun hashCode(): Int {
@@ -134,7 +181,8 @@ object AudioOutputStatus {
             result = 31 * result + (decoderName?.hashCode() ?: 0)
             result = 31 * result + (bufferSize ?: 0)
             result = 31 * result + (decoderOutputEncoding?.hashCode() ?: 0)
-            result = 31 * result + dspFormat.hashCode()
+            result = 31 * result + dspFormat.hashCode()
+            result = 31 * result + dspAvailable.hashCode()
             result = 31 * result + (directUsbProbe?.hashCode() ?: 0)
             result = 31 * result + (directSupport?.hashCode() ?: 0)
             result = 31 * result + directPlaybackSupported.hashCode()
@@ -146,7 +194,12 @@ object AudioOutputStatus {
             result = 31 * result + (halFormat?.hashCode() ?: 0)
             result = 31 * result + (usbEndpointFormat?.hashCode() ?: 0)
             result = 31 * result + (bluetoothTelemetry?.hashCode() ?: 0)
+            result = 31 * result + (bluetoothProfile?.hashCode() ?: 0)
             result = 31 * result + (negotiationResult?.hashCode() ?: 0)
+            result = 31 * result + outputExact.hashCode()
+            result = 31 * result + (outputExactDetail?.hashCode() ?: 0)
+            result = 31 * result + (loudnessGainDb?.hashCode() ?: 0)
+            result = 31 * result + (loudnessLufs?.hashCode() ?: 0)
             return result
         }
     }
@@ -193,6 +246,16 @@ object AudioOutputStatus {
             else -> AudioRouting.Kind.PHONE
         }
 
+        val bluetoothProfile = when (device?.type) {
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "A2DP"
+            AudioDeviceInfo.TYPE_BLE_HEADSET,
+            AudioDeviceInfo.TYPE_BLE_SPEAKER,
+            AudioDeviceInfo.TYPE_BLE_BROADCAST,
+            -> "LE Audio"
+            AudioDeviceInfo.TYPE_HEARING_AID -> "Hearing Aid"
+            else -> null
+        }
+
         val isDirectUsbViable = directUsbProbe?.isViable == true && isUsbDevice
         val isDirectAudioTrack = directSupport?.isDirectSupported == true && computedRouteKind != AudioRouting.Kind.PHONE
         val transport = when {
@@ -228,6 +291,7 @@ object AudioOutputStatus {
             sampleRatesHz = device?.sampleRates ?: IntArray(0),
             encodings = device?.encodings ?: IntArray(0),
             isUsb = isUsbDevice,
+            bluetoothProfile = bluetoothProfile,
             routeKind = computedRouteKind,
             requestedTransportType = transport,
             transportType = transport,
@@ -254,12 +318,31 @@ object AudioOutputStatus {
             directPlaybackSupported = result.route.directSupport.isDirectSupported,
             directPlaybackSelected = result.output.isDirect && result.output.transport != TransportType.DIRECT_USB,
             directPlaybackDetail = result.route.directSupport.description,
+            directSupport = result.route.directSupport,
+            deviceName = if (result.route.deviceName.isNotBlank()) result.route.deviceName else current.value.deviceName,
+            isUsb = result.route.kind == AudioRouting.Kind.USB,
+            sampleRatesHz = if (result.route.advertisedSampleRates.isNotEmpty()) {
+                result.route.advertisedSampleRates.toIntArray()
+            } else {
+                current.value.sampleRatesHz
+            },
+            encodings = if (result.route.advertisedEncodings.isNotEmpty()) {
+                result.route.advertisedEncodings.toIntArray()
+            } else {
+                current.value.encodings
+            },
             bluetoothTelemetry = result.route.bluetoothTelemetry,
             fallbackReason = result.output.fallbackReason,
             fallbackDetail = result.output.fallbackDetail,
             systemMixerRateHz = result.output.systemMixerRateHz,
-            decoderOutputEncoding = result.decoder.encoding,
-            dspFormat = result.dsp.format,
+            // decoderOutputEncoding and dspFormat are deliberately not taken from
+            // the negotiation. The negotiator predicts a route; it never sees a
+            // decoder buffer, so both of those fields are constants there
+            // ("Float32"). [publishDsp] carries the measured values, written by
+            // the sink once it has a real format in hand — and since this runs on
+            // every route change and on every Bluetooth telemetry tick, copying
+            // the constants here overwrote the measurement within milliseconds
+            // and left both rows reading "Float32" forever.
         )
         current.value = evaluateActualPath(baseSnapshot)
     }
@@ -268,11 +351,39 @@ object AudioOutputStatus {
         current.value = current.value.copy(decoderName = decoderName)
     }
 
-    fun publishDsp(decoderOutputEncoding: String?, dspFormat: String = "Float32") {
+    fun publishDsp(
+        decoderOutputEncoding: String?,
+        dspFormat: String = "Float32",
+        dspAvailable: Boolean = true,
+    ) {
         current.value = current.value.copy(
             decoderOutputEncoding = decoderOutputEncoding,
             dspFormat = dspFormat,
+            dspAvailable = dspAvailable,
         )
+    }
+
+    /**
+     * Whether the output encoding carries the decoder's samples intact, and why
+     * not when it doesn't. Written only by the sink the listener can hear — see
+     * `PrecisionAudioSink.isAudible`.
+     */
+    fun publishOutputExactness(exact: Boolean, detail: String?) {
+        current.value = current.value.copy(
+            outputExact = exact,
+            outputExactDetail = detail,
+        )
+    }
+
+    /**
+     * What loudness normalization is doing to the playing track. Nulls mean
+     * "nothing" — off, or YouTube offered no figure for this track — and are
+     * what the readout shows as inactive.
+     */
+    fun publishLoudness(gainDb: Float?, lufs: Float?) {
+        val snapshot = current.value
+        if (snapshot.loudnessGainDb == gainDb && snapshot.loudnessLufs == lufs) return
+        current.value = snapshot.copy(loudnessGainDb = gainDb, loudnessLufs = lufs)
     }
 
     fun publishAudioTrack(encoding: Int, sampleRateHz: Int, bufferSize: Int? = null) {
@@ -306,14 +417,19 @@ object AudioOutputStatus {
             )
         }
 
+        val directSupport = snapshot.directSupport
+            ?: snapshot.negotiationResult?.route?.directSupport
+
+        val directSupported = directSupport?.isDirectSupported == true
+
         val requestedDirect = snapshot.requestedTransportType == TransportType.AUDIO_TRACK_DIRECT ||
             snapshot.directPlaybackSelected ||
-            (snapshot.directSupport?.isDirectSupported == true && snapshot.routeKind != AudioRouting.Kind.PHONE)
+            snapshot.negotiationResult?.output?.isDirect == true ||
+            (directSupported && snapshot.routeKind != AudioRouting.Kind.PHONE)
 
         val sampleRate = snapshot.actualSampleRateHz
             ?: snapshot.negotiationResult?.output?.sampleRateHz
             ?: snapshot.negotiationResult?.source?.sampleRateHz
-            ?: 48000
 
         val encoding = snapshot.actualEncoding
             ?: when (snapshot.negotiationResult?.output?.encoding) {
@@ -323,6 +439,27 @@ object AudioOutputStatus {
                 PcmEncoding.PCM_16BIT -> AudioFormat.ENCODING_PCM_16BIT
                 null -> null
             }
+
+        val sampleRates = if (snapshot.sampleRatesHz.isNotEmpty()) {
+            snapshot.sampleRatesHz
+        } else {
+            snapshot.negotiationResult?.route?.advertisedSampleRates?.toIntArray() ?: intArrayOf()
+        }
+        val encodings = if (snapshot.encodings.isNotEmpty()) {
+            snapshot.encodings
+        } else {
+            snapshot.negotiationResult?.route?.advertisedEncodings?.toIntArray() ?: intArrayOf()
+        }
+
+        // An unresolved rate/encoding means "not measured yet", not "unsupported":
+        // vetoing direct playback here would flash a false rejection before the
+        // first AudioTrack publish lands.
+        val rateMatchesDescriptors = sampleRates.isEmpty() ||
+            sampleRate == null ||
+            sampleRates.contains(sampleRate)
+        val encodingMatchesDescriptors = encodings.isEmpty() ||
+            encoding == null ||
+            encodings.contains(encoding)
 
         val defaultMixerRate = snapshot.systemMixerRateHz ?: 48000
 
@@ -340,21 +477,19 @@ object AudioOutputStatus {
                 )
             }
             AudioRouting.Kind.USB -> {
-                val directSupported = snapshot.directSupport?.isDirectSupported == true
-                val sampleRateSupported = snapshot.sampleRatesHz.isEmpty() ||
-                    snapshot.sampleRatesHz.contains(sampleRate) ||
-                    directSupported
-                val encodingSupported = snapshot.encodings.isEmpty() ||
-                    (encoding != null && snapshot.encodings.contains(encoding)) ||
-                    directSupported
+                // A runtime direct-support probe outranks the device's static USB
+                // descriptors: the descriptors cap what the device claims, the probe
+                // reports what AudioPolicy will actually accept.
+                val sampleRateSupported = rateMatchesDescriptors || directSupported
+                val encodingSupported = encodingMatchesDescriptors || directSupported
                 val isFloatPcm = encoding == AudioFormat.ENCODING_PCM_FLOAT
 
-                val maxUsbRate = snapshot.sampleRatesHz.maxOrNull() ?: 48000
+                val maxUsbRate = sampleRates.maxOrNull() ?: 48000
                 val usbEnc = when {
-                    snapshot.encodings.contains(AudioFormat.ENCODING_PCM_32BIT) -> "PCM32"
-                    snapshot.encodings.contains(AudioFormat.ENCODING_PCM_24BIT_PACKED) -> "PCM24"
-                    snapshot.encodings.contains(AudioFormat.ENCODING_PCM_FLOAT) -> "Float32"
-                    snapshot.encodings.contains(AudioFormat.ENCODING_PCM_16BIT) -> "PCM16"
+                    encodings.contains(AudioFormat.ENCODING_PCM_32BIT) -> "PCM32"
+                    encodings.contains(AudioFormat.ENCODING_PCM_24BIT_PACKED) -> "PCM24"
+                    encodings.contains(AudioFormat.ENCODING_PCM_FLOAT) -> "Float32"
+                    encodings.contains(AudioFormat.ENCODING_PCM_16BIT) -> "PCM16"
                     else -> "PCM16"
                 }
                 val usbEndpointStr = "$usbEnc / $maxUsbRate Hz"
@@ -376,7 +511,7 @@ object AudioOutputStatus {
                         halFormat = null,
                         usbEndpointFormat = usbEndpointStr,
                     )
-                } else if (requestedDirect || snapshot.directSupport?.isDirectSupported == true) {
+                } else if (requestedDirect || directSupported) {
                     snapshot.copy(
                         transportType = TransportType.AUDIO_TRACK,
                         directPlaybackRequested = true,
@@ -415,10 +550,9 @@ object AudioOutputStatus {
                 )
             }
             else -> {
-                val sampleRateSupported = snapshot.sampleRatesHz.isEmpty() || snapshot.sampleRatesHz.contains(sampleRate)
                 val isGenuineDirect = requestedDirect &&
-                    snapshot.directSupport?.isDirectSupported == true &&
-                    sampleRateSupported
+                    directSupported &&
+                    rateMatchesDescriptors
 
                 if (isGenuineDirect) {
                     snapshot.copy(

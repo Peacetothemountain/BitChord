@@ -4,10 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
+	"html/template"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/KabirSinghBhatia/BitChord/backend/clock"
+	"github.com/KabirSinghBhatia/BitChord/backend/codes"
 	"github.com/KabirSinghBhatia/BitChord/backend/config"
 	"github.com/KabirSinghBhatia/BitChord/backend/hub"
 	"github.com/KabirSinghBhatia/BitChord/backend/party"
@@ -39,13 +44,17 @@ func main() {
 	mux := http.NewServeMux()
 
 	// REST endpoints
-	mux.HandleFunc("GET /", handleRoot)
+	mux.HandleFunc("GET /{$}", handleRoot)
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /api/time", handleTime)
 	mux.HandleFunc("POST /api/parties", handleCreateParty)
 	mux.HandleFunc("POST /api/parties/{code}/join", handleJoinParty)
 	mux.HandleFunc("GET /api/parties/{code}", handleGetParty)
+	mux.HandleFunc("GET /api/parties/{code}/preview", handlePreviewParty)
 	mux.HandleFunc("POST /api/parties/{code}/leave", handleLeaveParty)
+
+	// Web invite endpoint
+	mux.HandleFunc("GET /invite/{code}", handleInviteLanding)
 
 	// WebSocket endpoint
 	mux.HandleFunc("GET /ws/parties/{code}", handleWebSocket)
@@ -191,6 +200,10 @@ func parseBearerToken(r *http.Request) string {
 // REST Handlers
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"service":    "bitchord-listen-together",
 		"maxMembers": config.MaxMembers,
@@ -315,6 +328,66 @@ func handleJoinParty(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handlePreviewParty answers who is in a party, without a token and without
+// joining it.
+//
+// Deliberately unauthenticated: the whole point is to let somebody who has been
+// handed a code see who they would be joining before they commit a device slot
+// to it. What it discloses — display names, avatars, how full the party is — is
+// exactly what joining would disclose a second later, and anyone holding a code
+// can join. What it does not disclose is what the party is playing, its queue,
+// member or user ids, or anything that would let a caller act on the party.
+//
+// Not rate-limited beyond the service-wide limits: it takes no locks it does
+// not release, allocates a short slice, and creates nothing.
+func handlePreviewParty(w http.ResponseWriter, r *http.Request) {
+	code := r.PathValue("code")
+	p, err := store.Get(code)
+	if err != nil {
+		if pe, ok := err.(*party.PartyError); ok {
+			jsonError(w, pe.Status, pe.Code, pe.Message)
+			return
+		}
+		jsonError(w, http.StatusNotFound, "no_such_party", "No party with that code.")
+		return
+	}
+
+	p.Lock()
+	// Joined order, as the snapshot uses: the caller draws the first few faces
+	// and counts the rest, so which faces those are must not change between two
+	// reads of an unchanged party.
+	ordered := make([]*party.Member, 0, len(p.Members))
+	for _, m := range p.Members {
+		ordered = append(ordered, m)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		return ordered[i].JoinedAtMs < ordered[j].JoinedAtMs
+	})
+	members := make([]map[string]interface{}, 0, len(ordered))
+	hostName := ""
+	for _, m := range ordered {
+		members = append(members, map[string]interface{}{
+			"displayName": m.DisplayName,
+			"avatarUrl":   m.AvatarUrl,
+			"isHost":      m.IsHost,
+		})
+		if m.IsHost {
+			hostName = m.DisplayName
+		}
+	}
+	preview := map[string]interface{}{
+		"code":        p.Code,
+		"hostName":    hostName,
+		"memberCount": len(p.Members),
+		"maxMembers":  p.MaxMembers,
+		"isFull":      len(p.Members) >= p.MaxMembers,
+		"members":     members,
+	}
+	p.Unlock()
+
+	jsonResponse(w, http.StatusOK, preview)
+}
+
 func handleGetParty(w http.ResponseWriter, r *http.Request) {
 	code := r.PathValue("code")
 	token := parseBearerToken(r)
@@ -393,6 +466,272 @@ func handleLeaveParty(w http.ResponseWriter, r *http.Request) {
 	hubInst.Broadcast(p.Code, membersFrame, memberId)
 
 	jsonResponse(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// Web Invite Landing Handler
+
+type invitePageData struct {
+	Code              string
+	DeepLink          string
+	IntentURI         template.URL
+	SafeDeepLink      template.URL
+	ServerOrigin      string
+	CurrentSongTitle  string
+	CurrentSongArtist string
+	MemberCount       int
+	IsActive          bool
+}
+
+var inviteTemplate = template.Must(template.New("invite").Parse(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BitChord Listen Together - Party {{.Code}}</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #0b0b0e;
+            color: #f3f3f7;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .container {
+            background: rgba(22, 22, 30, 0.85);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 28px;
+            max-width: 440px;
+            width: 100%;
+            padding: 36px 28px;
+            text-align: center;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 0 0 40px rgba(124, 77, 255, 0.1);
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(124, 77, 255, 0.15);
+            color: #b388ff;
+            font-size: 13px;
+            font-weight: 600;
+            padding: 6px 14px;
+            border-radius: 9999px;
+            margin-bottom: 20px;
+            letter-spacing: 0.5px;
+        }
+        .badge-dot {
+            width: 8px;
+            height: 8px;
+            background: #00e676;
+            border-radius: 50%;
+            box-shadow: 0 0 8px #00e676;
+        }
+        .badge-dot.offline {
+            background: #ff5252;
+            box-shadow: 0 0 8px #ff5252;
+        }
+        h1 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            letter-spacing: -0.5px;
+        }
+        .subtitle {
+            color: #9e9ea7;
+            font-size: 15px;
+            line-height: 1.5;
+            margin-bottom: 28px;
+        }
+        .code-box {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 18px;
+            padding: 16px 20px;
+            margin-bottom: 28px;
+        }
+        .code-label {
+            font-size: 12px;
+            color: #71717a;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 6px;
+        }
+        .code-val {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 32px;
+            font-weight: 800;
+            letter-spacing: 6px;
+            color: #ffffff;
+        }
+        .now-playing {
+            font-size: 14px;
+            color: #d1d1d6;
+            margin-top: 10px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 16px 24px;
+            background: linear-gradient(135deg, #7c4dff 0%, #3d5afe 100%);
+            color: #ffffff;
+            font-size: 16px;
+            font-weight: 600;
+            text-decoration: none;
+            border-radius: 16px;
+            border: none;
+            cursor: pointer;
+            transition: transform 0.15s ease, opacity 0.15s ease;
+            box-shadow: 0 8px 24px rgba(124, 77, 255, 0.35);
+        }
+        .btn:hover {
+            transform: translateY(-1px);
+            opacity: 0.95;
+        }
+        .btn:active {
+            transform: scale(0.98);
+        }
+        .footer-note {
+            margin-top: 24px;
+            font-size: 13px;
+            color: #71717a;
+            line-height: 1.5;
+        }
+        .footer-note a {
+            color: #b388ff;
+            text-decoration: none;
+        }
+        .footer-note a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        {{if .IsActive}}
+            <div class="badge">
+                <span class="badge-dot"></span>
+                <span>Listen Together • {{.MemberCount}} in party</span>
+            </div>
+            <h1>Join the Music Party</h1>
+            <p class="subtitle">Opening BitChord to sync playback in real time.</p>
+            <div class="code-box">
+                <div class="code-label">Party Code</div>
+                <div class="code-val">{{.Code}}</div>
+                {{if .CurrentSongTitle}}
+                    <div class="now-playing">🎵 {{.CurrentSongTitle}} - {{.CurrentSongArtist}}</div>
+                {{end}}
+            </div>
+            <a id="joinBtn" href="{{.IntentURI}}" class="btn">Join Party in BitChord</a>
+            <p class="footer-note">
+                Didn’t open automatically? Tap the button above.<br>
+                Don't have BitChord yet? <a href="https://github.com/kushagrasinghx/BitChord/releases" target="_blank" rel="noopener">Download it here</a>.
+            </p>
+            <script>
+                var intentUri = {{.IntentURI}};
+                var deepLink = {{.SafeDeepLink}};
+                function launch() {
+                    if (/Android/i.test(navigator.userAgent)) {
+                        window.location.href = intentUri;
+                    } else {
+                        window.location.href = deepLink;
+                    }
+                }
+                setTimeout(launch, 100);
+            </script>
+        {{else}}
+            <div class="badge">
+                <span class="badge-dot offline"></span>
+                <span>Party Inactive</span>
+            </div>
+            <h1>Party Not Found</h1>
+            <p class="subtitle">This party code has expired or does not exist on this server.</p>
+            <div class="code-box">
+                <div class="code-label">Party Code</div>
+                <div class="code-val" style="color: #a1a1aa;">{{.Code}}</div>
+            </div>
+            <p class="footer-note">
+                Please ask the host for a new invite link or check your server configuration.
+            </p>
+        {{end}}
+    </div>
+</body>
+</html>`))
+
+func requestOrigin(r *http.Request) string {
+	proto := "http"
+	if r.TLS != nil {
+		proto = "https"
+	}
+	if config.TrustProxy {
+		if forwardedProto := r.Header.Get("X-Forwarded-Proto"); forwardedProto != "" {
+			proto = strings.TrimSpace(strings.Split(forwardedProto, ",")[0])
+		}
+	}
+	host := r.Host
+	if host == "" {
+		host = "localhost"
+	}
+	return fmt.Sprintf("%s://%s", proto, host)
+}
+
+func handleInviteLanding(w http.ResponseWriter, r *http.Request) {
+	code := codes.Normalise(r.PathValue("code"))
+	origin := requestOrigin(r)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if len(code) != codes.CodeLength {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = inviteTemplate.Execute(w, invitePageData{
+			Code:     html.EscapeString(r.PathValue("code")),
+			IsActive: false,
+		})
+		return
+	}
+
+	p := store.Find(code)
+	if p == nil {
+		w.WriteHeader(http.StatusNotFound)
+		_ = inviteTemplate.Execute(w, invitePageData{
+			Code:     code,
+			IsActive: false,
+		})
+		return
+	}
+
+	deepLink := fmt.Sprintf("bitchord://party/%s?server=%s", url.PathEscape(code), url.QueryEscape(origin))
+	intentURI := fmt.Sprintf("intent://party/%s?server=%s#Intent;scheme=bitchord;end", url.PathEscape(code), url.QueryEscape(origin))
+
+	currentSongTitle := ""
+	currentSongArtist := ""
+	p.Lock()
+	if p.Playback != nil && p.Playback.Track != nil {
+		currentSongTitle = p.Playback.Track.Title
+		currentSongArtist = p.Playback.Track.Artist
+	}
+	memberCount := len(p.Members)
+	p.Unlock()
+
+	w.WriteHeader(http.StatusOK)
+	_ = inviteTemplate.Execute(w, invitePageData{
+		Code:              code,
+		DeepLink:          deepLink,
+		IntentURI:         template.URL(intentURI),
+		SafeDeepLink:      template.URL(deepLink),
+		ServerOrigin:      origin,
+		CurrentSongTitle:  currentSongTitle,
+		CurrentSongArtist: currentSongArtist,
+		MemberCount:       memberCount,
+		IsActive:          true,
+	})
 }
 
 // WebSocket Handler
@@ -531,7 +870,9 @@ func handleSocketFrame(p *party.Party, member *party.Member, sc *hub.SafeConn, f
 				hubInst.Broadcast(p.Code, queueFrame(p), "")
 			}
 			hubInst.Broadcast(p.Code, stateFrame(p), "")
-			if action == protocol.ActionKick || action == protocol.ActionSetMaxMembers {
+			if action == protocol.ActionKick ||
+				action == protocol.ActionSetMaxMembers ||
+				action == protocol.ActionSetHostOnlyControl {
 				hubInst.Broadcast(p.Code, membersFrame(p), "")
 			}
 			hubInst.Broadcast(p.Code, activityFrame(member, action, frame), "")
@@ -546,6 +887,14 @@ func handleSocketFrame(p *party.Party, member *party.Member, sc *hub.SafeConn, f
 }
 
 func applyControl(p *party.Party, member *party.Member, action string, frame map[string]interface{}) (bool, string, string) {
+	// Enforced here rather than left to the clients. An app that hides its own
+	// next button is a courtesy; this is what actually stops a listener's
+	// device — a stale build, a backgrounded one still echoing an old intent,
+	// or something else entirely — from moving the music for everybody.
+	if protocol.ControlActions[action] && !p.MayControl(member) {
+		return false, "host_only", "Only the host can control the music in this party."
+	}
+
 	var posPtr *int64
 	if pos, ok := frame["positionMs"].(float64); ok {
 		pVal := int64(pos)
@@ -700,12 +1049,27 @@ func applyControl(p *party.Party, member *party.Member, action string, frame map
 		p.Playback.SetAutoplay(&member.MemberId, enabled)
 		return true, "", ""
 
+	case protocol.ActionSetHostOnlyControl:
+		enabled, ok := frame["enabled"].(bool)
+		if !ok {
+			return false, "invalid_control_policy", "Host-only control must be enabled or disabled."
+		}
+		if err := p.SetHostOnlyControl(member, enabled); err != nil {
+			pe := err.(*party.PartyError)
+			return false, pe.Code, pe.Message
+		}
+		return true, "", ""
+
 	case protocol.ActionKick:
 		targetID, _ := frame["memberId"].(string)
 		if !member.IsHost { return false, "host_only", "Only the host can remove listeners." }
 		if targetID == "" || targetID == member.MemberId { return false, "invalid_member", "Choose another listener to remove." }
 		if p.Remove(targetID) == nil { return false, "not_found", "That listener is no longer in this party." }
-		hubInst.Send(p.Code, targetID, map[string]interface{}{ "type": protocol.FrameBye, "message": "The host removed you from this party." })
+		hubInst.Send(p.Code, targetID, map[string]interface{}{
+			"type":    protocol.FrameBye,
+			"reason":  "kicked",
+			"message": "The host removed you from this party.",
+		})
 		hubInst.CloseMember(p.Code, targetID)
 		return true, "", ""
 
@@ -772,10 +1136,11 @@ func membersFrame(p *party.Party) map[string]interface{} {
 		membersList = append(membersList, m.ToWire())
 	}
 	return map[string]interface{}{
-		"type":       protocol.FrameMembers,
-		"members":    membersList,
-		"maxMembers": p.MaxMembers,
-		"serverMs":   clock.NowMs(),
+		"type":            protocol.FrameMembers,
+		"members":         membersList,
+		"maxMembers":      p.MaxMembers,
+		"hostOnlyControl": p.HostOnlyControl,
+		"serverMs":        clock.NowMs(),
 	}
 }
 

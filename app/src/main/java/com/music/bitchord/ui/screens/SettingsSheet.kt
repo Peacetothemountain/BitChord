@@ -2,6 +2,7 @@ package com.music.bitchord.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioFormat
 import android.media.audiofx.AudioEffect
 import android.net.Uri
 import android.provider.Settings
@@ -26,6 +27,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.ScrollState
 import androidx.compose.material.icons.Icons
 import com.music.bitchord.ui.components.EqualizerSheet
 import androidx.compose.material.icons.automirrored.rounded.Notes
@@ -53,6 +55,7 @@ import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Translate
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.LocalOffer
 import androidx.compose.material.icons.rounded.MusicOff
@@ -66,6 +69,7 @@ import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.SurroundSound
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VolumeOff
+import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Waves
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -91,6 +95,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -129,6 +134,7 @@ import com.music.bitchord.ui.performance.resolvePerformanceRefreshRate
 import com.music.bitchord.ui.performance.supportedPerformanceRefreshRates
 import com.music.bitchord.data.model.Account
 import com.music.bitchord.data.LocalMediaRepository
+import com.music.bitchord.data.NerdStats
 import com.music.bitchord.data.scrobbling.LastFM
 import com.music.bitchord.data.listentogether.ListenTogether
 import com.music.bitchord.data.settings.AppSettings
@@ -208,7 +214,10 @@ fun SettingsScreen(
     var showEqualizer by remember { mutableStateOf(false) }
     val outputPcmMode by AppSettings.outputPcmMode.collectAsStateWithLifecycle()
     val preferUsbDac by AppSettings.preferUsbDac.collectAsStateWithLifecycle()
+    val loudnessNormalization by AppSettings.loudnessNormalization.collectAsStateWithLifecycle()
     val outputStatus by AudioOutputStatus.current.collectAsStateWithLifecycle()
+    val playingFormat by NerdStats.current.collectAsStateWithLifecycle()
+    val playingDolbyAtmos = playingFormat?.isDolbyAtmos == true
     val cacheLimitBytes by AppSettings.audioCacheLimitBytes.collectAsStateWithLifecycle()
     val downloadQuality by AppSettings.downloadQuality.collectAsStateWithLifecycle()
     val wifiOnlyDownloads by AppSettings.wifiOnlyDownloads.collectAsStateWithLifecycle()
@@ -218,9 +227,11 @@ fun SettingsScreen(
     val smartDownloadsOverMobile by AppSettings.smartDownloadsOverMobile.collectAsStateWithLifecycle()
     val stopOnTaskRemoved by AppSettings.stopOnTaskRemoved.collectAsStateWithLifecycle()
     val hideVolumeBar by AppSettings.hideVolumeBar.collectAsStateWithLifecycle()
+    val hideSongStatus by AppSettings.hideSongStatus.collectAsStateWithLifecycle()
     val swipeToPlayNext by AppSettings.swipeToPlayNext.collectAsStateWithLifecycle()
     val dontRepeatSuggestions by AppSettings.dontRepeatSuggestions.collectAsStateWithLifecycle()
     val preferMusicOnly by AppSettings.preferMusicOnly.collectAsStateWithLifecycle()
+    val smartVersionAlignment by AppSettings.smartVersionAlignment.collectAsStateWithLifecycle()
     val filterNonMusicAudio by AppSettings.filterNonMusicAudio.collectAsStateWithLifecycle()
     val localMusicFolderUri by AppSettings.localMusicFolderUri.collectAsStateWithLifecycle()
     val highPerformanceMode by AppSettings.highPerformanceMode.collectAsStateWithLifecycle()
@@ -346,8 +357,18 @@ fun SettingsScreen(
 
     // What is left after a keystroke is a different list, and the offset the
     // last one was scrolled to means nothing in it.
-    val scrollState = rememberScrollState()
-    LaunchedEffect(searchQuery) { scrollState.scrollTo(0) }
+    val scrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
+    var isFirstSearchComposition by remember { mutableStateOf(true) }
+    LaunchedEffect(searchQuery) {
+        if (isFirstSearchComposition && searchQuery.isEmpty()) {
+            // Skip the initial composition during Activity recreation:
+            // rememberSaveable already restored the scroll position.
+            isFirstSearchComposition = false
+        } else {
+            isFirstSearchComposition = false
+            scrollState.scrollTo(0)
+        }
+    }
 
     Column(
         modifier = modifier
@@ -615,6 +636,25 @@ fun SettingsScreen(
                     badge = stringResource(R.string.connected).takeIf { outputStatus.isUsb },
                 )
             }
+            val loudnessTitle = stringResource(R.string.loudness_normalization)
+            row(loudnessTitle, "loudness", "volume", "normalize", "replaygain", "lufs") {
+                SettingsRow(
+                    icon = Icons.Rounded.VolumeUp,
+                    title = loudnessTitle,
+                    subtitle = stringResource(R.string.loudness_normalization_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = loudnessNormalization,
+                            onCheckedChange = AppSettings::setLoudnessNormalization,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setLoudnessNormalization(!loudnessNormalization) },
+                )
+            }
             // Automix decides its own length from each pair of tracks —
             // tempo, key, structure — so it replaces the manual slider rather
             // than needing it set to anything first.
@@ -671,7 +711,18 @@ fun SettingsScreen(
                 SettingsRow(
                     icon = Icons.AutoMirrored.Rounded.VolumeOff,
                     title = skipSilenceTitle,
-                    subtitle = stringResource(R.string.skip_silence_subtitle),
+                    // Silence skipping is Media3's own processor, and
+                    // `DefaultAudioSink.configure` appends that processor list
+                    // only on its 16-bit branch — the float branch gets the
+                    // format converter and nothing else. So on a float track
+                    // this switch really does nothing, and the row says so
+                    // rather than letting someone toggle it and wonder. The
+                    // equaliser is unaffected: it runs upstream of that sink.
+                    subtitle = if (outputStatus.actualEncoding == AudioFormat.ENCODING_PCM_FLOAT) {
+                        stringResource(R.string.skip_silence_float_subtitle)
+                    } else {
+                        stringResource(R.string.skip_silence_subtitle)
+                    },
                     trailing = {
                         Switch(
                             checked = skipSilence,
@@ -690,7 +741,19 @@ fun SettingsScreen(
                 SettingsRow(
                     icon = Icons.Rounded.SurroundSound,
                     title = spatialAudioTitle,
-                    subtitle = stringResource(R.string.spatial_audio_subtitle),
+                    // Widening a JOC stream would fight the object-based mix
+                    // Dolby has already spatialized, so the service holds this
+                    // off for the duration of an Atmos track — see
+                    // `PlaybackService.applySpatialAudioEnabled`. Said on the
+                    // row because the switch stays where the listener left it,
+                    // and a switch reading "on" over an effect that is not
+                    // running is the same silent lie the equaliser screen used
+                    // to tell.
+                    subtitle = if (playingDolbyAtmos) {
+                        stringResource(R.string.spatial_audio_atmos_subtitle)
+                    } else {
+                        stringResource(R.string.spatial_audio_subtitle)
+                    },
                     trailing = {
                         Switch(
                             checked = spatialAudio,
@@ -1262,6 +1325,25 @@ fun SettingsScreen(
                     onClick = { AppSettings.setHideVolumeBar(!hideVolumeBar) },
                 )
             }
+            val hideSongStatusTitle = stringResource(R.string.hide_song_status)
+            row(hideSongStatusTitle, "player", "playing from", "played by") {
+                SettingsRow(
+                    icon = Icons.Rounded.VisibilityOff,
+                    title = hideSongStatusTitle,
+                    subtitle = stringResource(R.string.hide_song_status_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = hideSongStatus,
+                            onCheckedChange = AppSettings::setHideSongStatus,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setHideSongStatus(!hideSongStatus) },
+                )
+            }
         }
 
         SearchableSettingsGroup(search, header = stringResource(R.string.language)) {
@@ -1279,10 +1361,29 @@ fun SettingsScreen(
         }
 
         SearchableSettingsGroup(search, header = stringResource(R.string.advanced_options)) {
+            val smartAlignmentTitle = stringResource(R.string.smart_version_alignment)
+            row(smartAlignmentTitle, "alignment", "sync", "waveform", "video", "audio", "skit", "intro") {
+                SettingsRow(
+                    icon = Icons.Rounded.GraphicEq,
+                    title = smartAlignmentTitle,
+                    subtitle = stringResource(R.string.smart_version_alignment_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = smartVersionAlignment,
+                            onCheckedChange = AppSettings::setSmartVersionAlignment,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setSmartVersionAlignment(!smartVersionAlignment) },
+                )
+            }
             val showNerdStatsTitle = stringResource(R.string.show_nerd_stats)
             row(showNerdStatsTitle, "debug", "bitrate", "codec") {
                 SettingsRow(
-                    icon = Icons.Rounded.GraphicEq,
+                    icon = Icons.Rounded.BarChart,
                     title = showNerdStatsTitle,
                     subtitle = stringResource(R.string.show_nerd_stats_subtitle),
                     trailing = {
