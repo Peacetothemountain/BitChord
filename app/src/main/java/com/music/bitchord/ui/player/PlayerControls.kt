@@ -195,6 +195,7 @@ internal fun PlayerScrubber(
     transitionWindow: ClosedFloatingPointRange<Float>?,
     onScrub: (Float) -> Unit,
     onScrubFinished: () -> Unit,
+    isPlaying: Boolean = true,
     centerLabel: @Composable BoxScope.() -> Unit = {},
 ) {
     val shown = shown()
@@ -205,6 +206,7 @@ internal fun PlayerScrubber(
             onValueChangeFinished = onScrubFinished,
             loading = loading,
             transitionWindow = transitionWindow,
+            isPlaying = isPlaying,
         )
         Box(
             modifier = Modifier
@@ -401,10 +403,10 @@ internal fun TransportRow(
             // Same footprint as the play/pause target — a smaller box here
             // would shunt everything below it on every load.
             Box(Modifier.size(playTouch), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(
+                com.music.bitchord.ui.components.ExpressiveShapeSpinner(
                     color = Color.White,
                     strokeWidth = 3.dp,
-                    modifier = Modifier.size(if (compact) 30.dp else 38.dp),
+                    size = if (compact) 30.dp else 38.dp,
                 )
             }
         } else {
@@ -461,6 +463,7 @@ internal fun VolumeRow(
             onValueChangeFinished = onValueChangeFinished,
             idleHeight = 6.dp,
             activeHeight = 10.dp,
+            squiggly = false,
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(10.dp))
