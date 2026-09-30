@@ -143,6 +143,7 @@ import com.music.bitchord.playback.AudioOutputStatus
 import com.music.bitchord.data.settings.AutomixPerformanceMode
 import com.music.bitchord.R
 import com.music.bitchord.data.sources.DeviceCodecs
+import com.music.bitchord.data.sources.SourceRegistry
 import com.music.bitchord.data.settings.AudioQuality
 import com.music.bitchord.data.settings.DownloadQuality
 import com.music.bitchord.data.settings.ThemeMode
@@ -1888,6 +1889,11 @@ private fun QualitySheet(
         }
         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
 
+        val sourceConfigs by SourceRegistry.configs.collectAsStateWithLifecycle()
+        val hasLosslessSource = remember(sourceConfigs) {
+            sourceConfigs.any { it.enabled && it.isComplete && it.kind.canServeLossless }
+        }
+
         // Best first — the option most people want shouldn't be last.
         AudioQuality.entries.reversed().forEach { quality ->
             val chosen = quality == selected
@@ -1912,6 +1918,14 @@ private fun QualitySheet(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    if (quality == AudioQuality.LOSSLESS && !hasLosslessSource) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "No lossless Addon configured. Streams will fall back to YouTube audio until an Addon is configured in Sources.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
                 if (chosen) {
                     Spacer(Modifier.width(12.dp))
@@ -2046,6 +2060,11 @@ private fun DownloadQualitySheet(
         }
         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
 
+        val sourceConfigs by SourceRegistry.configs.collectAsStateWithLifecycle()
+        val hasLosslessSource = remember(sourceConfigs) {
+            sourceConfigs.any { it.enabled && it.isComplete && it.kind.canServeLossless }
+        }
+
         // Best first, matching [QualitySheet] — and here the best rung is also
         // the default, so the checkmark starts where the eye does.
         DownloadQuality.entries.reversed().forEach { quality ->
@@ -2071,6 +2090,14 @@ private fun DownloadQualitySheet(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    if (quality == DownloadQuality.LOSSLESS && !hasLosslessSource) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "No lossless Addon configured. Tracks will download from YouTube until a bit-exact Addon is configured in Sources.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
                 if (chosen) {
                     Spacer(Modifier.width(12.dp))

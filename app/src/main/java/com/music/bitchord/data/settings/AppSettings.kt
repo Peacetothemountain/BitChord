@@ -37,7 +37,7 @@ enum class AudioQuality(
     LOW(64, "Low", "~64 kbps · smallest download", "29 MB/hr"),
     MEDIUM(Int.MAX_VALUE, "Medium", "Best available · ~171 kbps Opus", "77 MB/hr"),
     HIGH(Int.MAX_VALUE, "High", "JioSaavn up to 320kbps, YouTube fallback", "144 MB/hr"),
-    LOSSLESS(Int.MAX_VALUE, "Lossless", "Your addons + JioSaavn, bit-exact where available", "300+ MB/hr"),
+    LOSSLESS(Int.MAX_VALUE, "Lossless", "Addons (bit-exact FLAC) + JioSaavn (320k), YouTube fallback", "300+ MB/hr"),
     ;
 
     fun permits(kind: com.music.bitchord.data.sources.SourceKind): Boolean = when (this) {
@@ -91,7 +91,7 @@ enum class DownloadQuality(
     LOSSLESS(
         Int.MAX_VALUE,
         "Lossless",
-        "Bit-exact if a source has it, best Opus if not",
+        "Bit-exact FLAC from configured Addons, best YouTube audio if none",
         "~35 MB",
         true,
     ),

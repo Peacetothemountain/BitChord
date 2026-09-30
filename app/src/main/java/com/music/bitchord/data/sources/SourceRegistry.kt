@@ -72,6 +72,10 @@ object SourceRegistry {
     /** Every configured source, enabled or not. */
     val configs = MutableStateFlow<List<SourceConfig>>(emptyList())
 
+    /** True when at least one active, complete source is capable of serving bit-exact lossless audio. */
+    fun hasActiveLosslessSource(): Boolean =
+        configs.value.any { it.enabled && it.isComplete && it.kind.canServeLossless }
+
     /**
      * Built instances, keyed by config id, rebuilt whenever [configs] changes.
      *

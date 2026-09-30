@@ -600,6 +600,9 @@ fun Song.toMediaItem(): MediaItem {
         MediaMetadata.Builder()
             .setTitle(title)
             .setArtist(artist)
+            .setDisplayTitle(title)
+            .setSubtitle(artist)
+            .setDescription(albumName)
             // The release this track came off, when whoever queued it knew.
             //
             // A native field rather than an extra because Media3 bundles this

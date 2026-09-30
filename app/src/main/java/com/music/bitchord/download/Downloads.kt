@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -71,12 +72,14 @@ object Downloads {
     private const val TAG = "BitChord"
     private const val KEY_SAVED_METADATA = "downloaded_tracks_metadata"
     private const val KEY_SAVED_COLLECTIONS = "downloaded_collections"
+    private const val KEY_PENDING = "download_pending_queue"
 
     private lateinit var prefs: SharedPreferences
     private val json = Json { ignoreUnknownKeys = true }
     private val serializer = MapSerializer(String.serializer(), String.serializer())
     private val metadataSerializer = MapSerializer(String.serializer(), SavedSongMetadata.serializer())
     private val collectionSerializer = MapSerializer(String.serializer(), SavedCollection.serializer())
+    private val pendingSerializer = ListSerializer(QueuedDownload.serializer())
 
     private val _active = MutableStateFlow<Map<String, DownloadState>>(emptyMap())
     val active: StateFlow<Map<String, DownloadState>> = _active.asStateFlow()
@@ -142,6 +145,18 @@ object Downloads {
      */
     private val running = LinkedHashMap<String, Job?>()
 
+    /** Songs currently in flight, for crash recovery and persistence across restarts. Guarded by [lock]. */
+    private val runningSongs = LinkedHashMap<String, Song>()
+
+    private fun persistQueue() {
+        if (!::prefs.isInitialized) return
+        val list = synchronized(lock) {
+            (runningSongs.values + pending.values).map { it.toQueuedDownload() }.distinctBy { it.videoId }
+        }
+        val encoded = json.encodeToString(pendingSerializer, list)
+        prefs.edit().putString(KEY_PENDING, encoded).apply()
+    }
+
     fun init(context: Context) {
         prefs = context.getSharedPreferences("bitchord_settings", Context.MODE_PRIVATE)
         _saved.value = runCatching {
@@ -153,6 +168,41 @@ object Downloads {
         _collections.value = runCatching {
             json.decodeFromString(collectionSerializer, prefs.getString(KEY_SAVED_COLLECTIONS, null) ?: "{}")
         }.getOrDefault(emptyMap())
+
+        val savedPending = runCatching {
+            json.decodeFromString(pendingSerializer, prefs.getString(KEY_PENDING, null) ?: "[]")
+        }.getOrDefault(emptyList())
+
+        val restoredAny = synchronized(lock) {
+            var any = false
+            for (q in savedPending) {
+                if (q.videoId !in pending && q.videoId !in running && q.videoId !in _saved.value) {
+                    pending[q.videoId] = q.toSong()
+                    any = true
+                }
+            }
+            any
+        }
+
+        if (restoredAny) {
+            _active.update { current ->
+                val updated = current.toMutableMap()
+                synchronized(lock) {
+                    pending.keys.forEach { id ->
+                        if (id !in updated) updated[id] = DownloadState.Queued
+                    }
+                }
+                updated
+            }
+            val app = context.applicationContext
+            val started = runCatching {
+                ContextCompat.startForegroundService(app, Intent(app, DownloadService::class.java))
+                true
+            }.getOrElse { false }
+            if (!started) {
+                DownloadQueueWorker.enqueue(app)
+            }
+        }
     }
 
     // ---- Asking -------------------------------------------------------------
@@ -191,8 +241,9 @@ object Downloads {
             return
         }
         synchronized(lock) {
-            if (id in pending || id in running) return
+            if (id in pending || id in running || id in runningSongs) return
             pending[id] = song
+            persistQueue()
         }
         _active.update { it + (id to DownloadState.Queued) }
         DownloadSession.queued(song, from)
@@ -225,6 +276,8 @@ object Downloads {
     fun cancel(videoId: String) {
         val job = synchronized(lock) {
             pending.remove(videoId)
+            runningSongs.remove(videoId)
+            persistQueue()
             if (videoId !in running) return@synchronized null
             running.remove(videoId)
         }
@@ -765,6 +818,8 @@ object Downloads {
         val entry = pending.entries.firstOrNull() ?: return null
         pending.remove(entry.key)
         running[entry.key] = null
+        runningSongs[entry.key] = entry.value
+        persistQueue()
         entry.value
     }
 
@@ -780,11 +835,15 @@ object Downloads {
 
     /** [videoId] is finished, one way or another, and no longer holds a worker. */
     internal fun onIdle(videoId: String) {
-        synchronized(lock) { running.remove(videoId) }
+        synchronized(lock) {
+            running.remove(videoId)
+            runningSongs.remove(videoId)
+            persistQueue()
+        }
     }
 
     /** Whether anything is still queued or in flight — see [DownloadService]'s workers. */
-    internal fun busy(): Boolean = synchronized(lock) { pending.isNotEmpty() || running.isNotEmpty() }
+    internal fun busy(): Boolean = synchronized(lock) { pending.isNotEmpty() || running.isNotEmpty() || runningSongs.isNotEmpty() }
 
     /**
      * The service is gone, so nothing is running any more.
@@ -795,7 +854,16 @@ object Downloads {
      * forever as already in flight.
      */
     internal fun onStopped() {
-        synchronized(lock) { running.clear() }
+        synchronized(lock) {
+            running.clear()
+            for ((id, song) in runningSongs) {
+                if (id !in pending && id !in _saved.value) {
+                    pending[id] = song
+                }
+            }
+            runningSongs.clear()
+            persistQueue()
+        }
     }
 
     /**
@@ -1323,6 +1391,46 @@ internal data class SavedSongMetadata(
     val downloadFormat: String? = null,
     /** Stable creation time for downloads that MediaStore does not index. */
     val dateAddedSeconds: Long? = null,
+)
+
+@kotlinx.serialization.Serializable
+internal data class QueuedDownload(
+    val videoId: String,
+    val title: String,
+    val artist: String,
+    val thumbnailUrl: String? = null,
+    val durationText: String? = null,
+    val artistId: String? = null,
+    val albumId: String? = null,
+    val albumName: String? = null,
+    val isVideo: Boolean = false,
+    val isVideoOrigin: Boolean = false,
+) {
+    fun toSong(): Song = Song(
+        videoId = videoId,
+        title = title,
+        artist = artist,
+        thumbnailUrl = thumbnailUrl,
+        durationText = durationText,
+        artistId = artistId,
+        albumId = albumId,
+        albumName = albumName,
+        isVideo = isVideo,
+        isVideoOrigin = isVideoOrigin,
+    )
+}
+
+internal fun Song.toQueuedDownload(): QueuedDownload = QueuedDownload(
+    videoId = videoId,
+    title = title,
+    artist = artist,
+    thumbnailUrl = thumbnailUrl,
+    durationText = durationText,
+    artistId = artistId,
+    albumId = albumId,
+    albumName = albumName,
+    isVideo = isVideo,
+    isVideoOrigin = isVideoOrigin,
 )
 
 /**

@@ -13,6 +13,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.music.bitchord.R
+import com.music.bitchord.data.DebugLog as Log
 import com.music.bitchord.data.model.Song
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -197,12 +198,19 @@ class DownloadService : Service() {
         stopSelf()
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        if (Downloads.busy()) {
+            DownloadQueueWorker.enqueue(applicationContext)
+        }
+    }
+
     override fun onDestroy() {
         releaseLocks()
         scope.cancel()
         val hasPending = Downloads.busy()
         Downloads.onStopped()
-        if (hasPending) {
+        if (hasPending || Downloads.busy()) {
             DownloadQueueWorker.enqueue(applicationContext)
         }
         super.onDestroy()
@@ -212,14 +220,20 @@ class DownloadService : Service() {
 
     private fun promote() {
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.e("DownloadService", "Could not promote to foreground service: ${e.message}")
+            DownloadQueueWorker.enqueue(applicationContext)
+            stopSelf()
         }
     }
 

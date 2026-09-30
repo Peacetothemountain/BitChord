@@ -47,11 +47,13 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.DataSourceBitmapLoader
 import androidx.media3.datasource.TransferListener
 import androidx.media3.exoplayer.upstream.BandwidthMeter
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
+import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
@@ -1593,6 +1595,7 @@ class PlaybackService : MediaLibraryService() {
         crossfade = controller
         controller.start()
 
+        val bitmapLoader = CacheBitmapLoader(DataSourceBitmapLoader(this))
         mediaSession = MediaLibrarySession.Builder(
             this,
             SessionPlayer(
@@ -1605,6 +1608,7 @@ class PlaybackService : MediaLibraryService() {
             MediaLibraryCallback(),
         )
             .setId(SESSION_ID)
+            .setBitmapLoader(bitmapLoader)
             .setSessionActivity(sessionActivity())
             .build()
         refreshCustomLayouts()
@@ -6517,14 +6521,45 @@ class PlaybackService : MediaLibraryService() {
             super.clearMediaItems()
         }
 
+        override fun getAvailableCommands(): Player.Commands {
+            val base = super.getAvailableCommands()
+            val builder = base.buildUpon()
+            if (mediaItemCount > 0) {
+                builder.add(COMMAND_SEEK_TO_NEXT)
+                builder.add(COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                builder.add(COMMAND_SEEK_TO_PREVIOUS)
+                builder.add(COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+            }
+            return builder.build()
+        }
+
+        override fun isCommandAvailable(command: Int): Boolean {
+            if (mediaItemCount > 0) {
+                if (command == COMMAND_SEEK_TO_NEXT ||
+                    command == COMMAND_SEEK_TO_NEXT_MEDIA_ITEM ||
+                    command == COMMAND_SEEK_TO_PREVIOUS ||
+                    command == COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM) {
+                    return true
+                }
+            }
+            return super.isCommandAvailable(command)
+        }
+
         override fun getMediaMetadata(): MediaMetadata {
             val base = wrappedPlayer.mediaMetadata
             val subtitle = getSubtitle()
-            return if (!subtitle.isNullOrBlank()) {
-                base.buildUpon().setSubtitle(subtitle).build()
-            } else {
-                base
+            val builder = base.buildUpon()
+            val effectiveSubtitle = if (!subtitle.isNullOrBlank()) subtitle else base.artist
+            if (effectiveSubtitle != null) {
+                builder.setSubtitle(effectiveSubtitle)
             }
+            if (base.displayTitle == null && base.title != null) {
+                builder.setDisplayTitle(base.title)
+            }
+            if (base.description == null && base.albumTitle != null) {
+                builder.setDescription(base.albumTitle)
+            }
+            return builder.build()
         }
 
         override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
