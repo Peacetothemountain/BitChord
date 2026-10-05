@@ -1,5 +1,7 @@
 package com.music.bitchord.data.model
 
+import androidx.compose.runtime.Immutable
+
 /** Tier of an item in the playback queue. */
 enum class QueueTier {
     /** Explicitly queued by user ("Play Next", "Add to Queue", or preserved user queue). */
@@ -11,6 +13,7 @@ enum class QueueTier {
 }
 
 /** A playable YouTube Music track. */
+@Immutable
 data class Song(
     val videoId: String,
     val title: String,
@@ -274,6 +277,7 @@ enum class PlaybackSourceType {
 }
 
 /** A non-track search result: album, artist or playlist. */
+@Immutable
 data class BrowseItem(
     val browseId: String,
     val title: String,
@@ -283,10 +287,14 @@ data class BrowseItem(
 )
 
 /** Search rows are heterogeneous once filters other than "Songs" are used. */
+@Immutable
 sealed interface SearchResult {
     /** The promoted card returned only at the head of an unfiltered search. */
+    @Immutable
     data class TopTrack(val song: Song) : SearchResult
+    @Immutable
     data class Track(val song: Song) : SearchResult
+    @Immutable
     data class Browse(val item: BrowseItem) : SearchResult
 }
 
@@ -301,6 +309,7 @@ enum class SearchFilter(val label: String, val params: String?) {
 }
 
 /** A card in a home-feed carousel: either a track (videoId) or an album/playlist (browseId). */
+@Immutable
 data class ShelfItem(
     val title: String,
     val subtitle: String,
@@ -310,6 +319,7 @@ data class ShelfItem(
 )
 
 /** The signed-in Google account, as YouTube Music reports it. */
+@Immutable
 data class Account(
     val name: String,
     val email: String,
@@ -333,6 +343,7 @@ data class Account(
  *   `datasyncIdToken` — never guessed, since Google answers one it cannot tie
  *   to the session with 401.
  */
+@Immutable
 data class AccountChannel(
     val name: String,
     val subtitle: String,
@@ -346,6 +357,7 @@ data class AccountChannel(
     val key: String get() = pageId ?: dataSyncId ?: name
 }
 
+@Immutable
 data class HomeShelf(
     val title: String,
     val items: List<ShelfItem>,
@@ -356,18 +368,21 @@ data class HomeShelf(
 )
 
 /** A page of the Home feed, plus the token for the next one — null once exhausted. */
+@Immutable
 data class HomeFeed(
     val shelves: List<HomeShelf>,
     val continuation: String?,
 )
 
 /** One server-defined group of the buttons shown on Explore. */
+@Immutable
 data class MoodGenreSection(
     val title: String,
     val items: List<MoodGenre>,
 )
 
 /** A mood or genre button and the exact browse request that it represents. */
+@Immutable
 data class MoodGenre(
     val title: String,
     val browseId: String,
@@ -381,6 +396,7 @@ data class MoodGenre(
  * Music playlist, the tracks explicitly added to the library, and a shelf per
  * saved collection (playlists, albums, artists, subscriptions, podcasts).
  */
+@Immutable
 data class LibraryPage(
     val likedSongs: List<Song>,
     val librarySongs: List<Song>,
@@ -398,6 +414,7 @@ data class LibraryPage(
 }
 
 /** A browsed album / artist / playlist page. */
+@Immutable
 data class DetailPage(
     val browseId: String,
     val title: String,
@@ -447,6 +464,7 @@ data class DetailPage(
  * playlist, and liking the browse id does nothing at all. So the id has to be
  * read off the page rather than derived from what was asked for.
  */
+@Immutable
 data class LibraryState(
     val playlistId: String,
     val saved: Boolean,
@@ -461,12 +479,14 @@ data class LibraryState(
  * assumed from the browse id, because the button is also what says whether
  * YouTube offers the action here at all.
  */
+@Immutable
 data class SubscriptionState(
     val channelId: String,
     val subscribed: Boolean,
 )
 
 /** Parsed artist landing page. */
+@Immutable
 data class ArtistPage(
     val songs: List<Song>,
     /** Playlist holding the artist's full song list, when the page links one. */
@@ -509,6 +529,7 @@ enum class PlaylistPrivacy(val label: String, val apiValue: String) {
  * takes; [browseId] is the same playlist addressed as a page. Keeping both
  * spares every caller from remembering which prefix each side wants.
  */
+@Immutable
 data class UserPlaylist(
     val playlistId: String,
     val title: String,
@@ -528,6 +549,7 @@ data class UserPlaylist(
  * arrive together on the watch queue's own menu, which is why this is one
  * lookup rather than two.
  */
+@Immutable
 data class SongMenu(
     /**
      * The rating YouTube states on this row, or null when the row states
@@ -541,8 +563,12 @@ data class SongMenu(
     val removeFromLibraryToken: String?,
 )
 
+@Immutable
 sealed interface UiState<out T> {
+    @Immutable
     data object Loading : UiState<Nothing>
+    @Immutable
     data class Success<T>(val data: T) : UiState<T>
+    @Immutable
     data class Error(val message: String) : UiState<Nothing>
 }

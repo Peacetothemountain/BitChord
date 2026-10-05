@@ -87,6 +87,10 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.stateDescription
+import kotlinx.coroutines.launch
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -418,6 +422,7 @@ internal fun TransportRow(
             TransportGlyph(
                 icon = if (isPlaying) R.drawable.ic_player_pause else R.drawable.ic_player_play,
                 contentDescription = stringResource(if (isPlaying) R.string.pause else R.string.play),
+                stateDescription = stringResource(if (isPlaying) R.string.pause else R.string.play),
                 size = playSize,
                 touchSize = playTouch,
                 onClick = onPlayPause,
@@ -672,8 +677,11 @@ private fun TransportGlyph(
     haptic: Haptic = Haptic.Tap,
     /** Vertical squash of the glyph alone; its width and touch box are untouched. */
     heightScale: Float = 1f,
+    stateDescription: String? = null,
 ) {
     val haptics = rememberHaptics()
+    val scope = rememberCoroutineScope()
+    val pressScale = remember { Animatable(1f) }
     // Faded rather than hidden: the row keeps its shape at the ends of a queue.
     val alpha by animateFloatAsState(
         targetValue = if (enabled) 1f else 0.3f,
@@ -682,23 +690,45 @@ private fun TransportGlyph(
     Box(
         modifier = Modifier
             .size(touchSize)
+            .semantics(mergeDescendants = true) {
+                this.contentDescription = contentDescription
+                if (stateDescription != null) {
+                    this.stateDescription = stateDescription
+                }
+            }
+            .clip(CircleShape)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
+                role = Role.Button,
+                onClickLabel = contentDescription,
                 enabled = enabled,
             ) {
                 haptics.play(haptic)
+                scope.launch {
+                    pressScale.animateTo(
+                        0.88f,
+                        spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioMediumBouncy),
+                    )
+                    pressScale.animateTo(
+                        1f,
+                        spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioMediumBouncy),
+                    )
+                }
                 onClick()
             },
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             painter = painterResource(icon),
-            contentDescription = contentDescription,
+            contentDescription = null,
             tint = Color.White.copy(alpha = alpha),
             modifier = Modifier
                 .size(size)
-                .then(if (heightScale != 1f) Modifier.graphicsLayer { scaleY = heightScale } else Modifier),
+                .graphicsLayer {
+                    scaleX = pressScale.value
+                    scaleY = pressScale.value * heightScale
+                },
         )
     }
 }

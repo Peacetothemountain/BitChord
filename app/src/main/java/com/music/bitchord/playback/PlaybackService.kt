@@ -2518,6 +2518,7 @@ class PlaybackService : MediaLibraryService() {
         .setLoadControl(farBufferingLoadControl())
         .setAudioAttributes(AUDIO_ATTRIBUTES, /* handleAudioFocus = */ ownsSession)
         .setHandleAudioBecomingNoisy(ownsSession)
+        .setWakeMode(C.WAKE_MODE_NETWORK)
         // Back restarts the track once you're this far into it; only a
         // press before that steps to the previous one.
         .setMaxSeekToPreviousPositionMs(BACK_RESTARTS_AFTER_MS)
@@ -3844,20 +3845,16 @@ class PlaybackService : MediaLibraryService() {
             return
         }
 
-        // There used to be an unconditional five-second hold here, keyed off the
-        // track's own position, so that an upgrade arriving with the first note
-        // could not cut the song a millisecond in. Its own reasoning said it was
-        // "almost always already past by now", and that turned out to be the
-        // whole story: by the time this line is reached the search, the stream
-        // lookup and the audition have all run, and the audition alone spends
-        // seconds on the network. So the guard was not usually deciding to wait
-        // — it was adding its five seconds to whatever the swap had already
-        // cost, on exactly the tracks that had been quickest to find a better
-        // copy. Removed rather than shortened: it is the crossfade grace below
-        // that protects the case an upgrade can genuinely spoil, and it does so
-        // by asking whether a transition actually happened rather than assuming
-        // one might have.
-        //
+        // Do not cut into the very opening bars of a song if it just started;
+        // let the intro establish itself smoothly before swapping to higher fidelity,
+        // avoiding an abrupt mute or stutter right after playback begins.
+        val currentPlayPos = withContext(Dispatchers.Main) { player?.currentPosition ?: 0L }
+        if (currentPlayPos in 1L until UPGRADE_START_GUARD_MS) {
+            val introGrace = UPGRADE_START_GUARD_MS - currentPlayPos
+            TrackLog.d("BitChord", "upgrade for $mediaId holding ${introGrace}ms so opening notes are not cut abruptly")
+            delay(introGrace)
+        }
+
         // Never cut into a crossfade in flight. `replaceMediaItem` tears the
         // session player's source down and rebuilds it — CrossfadeController
         // is either syncing its tail player's position against that same
@@ -5161,6 +5158,7 @@ class PlaybackService : MediaLibraryService() {
             /* bufferForPlaybackMs = */ START_PLAYBACK_MS,
             /* bufferForPlaybackAfterRebufferMs = */ RESUME_PLAYBACK_MS,
         )
+        .setPrioritizeTimeOverSizeThresholds(true)
         .setTargetBufferBytes(FAR_BUFFER_BYTES)
         .setBackBuffer(/* backBufferDurationMs = */ BACK_BUFFER_MS, /* retainBackBufferFromKeyframe = */ true)
         .build()
@@ -7549,11 +7547,17 @@ class PlaybackService : MediaLibraryService() {
          */
         const val BACK_BUFFER_MS = 30 * 1000
 
-        /** Enough to cover the decoder's own latency, not seconds of dead air. */
-        const val START_PLAYBACK_MS = 500
+        /**
+         * Enough to cover initial network jitter and pipeline warm-up without stalling.
+         * Sized to prevent immediate buffer underrun when streaming over cellular or WiFi.
+         */
+        const val START_PLAYBACK_MS = 2_000
 
         /** More room after a stall than at the start — see the load control. */
-        const val RESUME_PLAYBACK_MS = 2_000
+        const val RESUME_PLAYBACK_MS = 2_500
+
+        /** Grace period at track start during which an upgrade will hold before cutting audio. */
+        const val UPGRADE_START_GUARD_MS = 3_000L
 
         /**
          * Outer cap on stream resolution. Individual client calls and probes
