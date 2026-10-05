@@ -265,6 +265,61 @@ object Downloads {
     }
 
     /**
+     * Efficiently enqueues a batch of [songs] as part of release [from].
+     * Synchronizes, persists and starts foreground service / worker once.
+     */
+    fun enqueueAll(context: Context, songs: List<Song>, from: String? = null, forceAllowMobile: Boolean = false) {
+        if (songs.isEmpty()) return
+        val allowed = forceAllowMobile || AppSettings.downloadsAllowedNow
+        if (!allowed) {
+            songs.forEach { song ->
+                val id = song.videoId
+                val inFlight = _active.value[id]
+                if (inFlight !is DownloadState.Queued && inFlight !is DownloadState.Running) {
+                    DownloadSession.queued(song, from)
+                    fail(id, WIFI_ONLY_REFUSAL)
+                }
+            }
+            return
+        }
+
+        val added = mutableListOf<Song>()
+        synchronized(lock) {
+            for (song in songs) {
+                val id = song.videoId
+                if (id !in pending && id !in running && id !in runningSongs && id !in _saved.value) {
+                    pending[id] = song
+                    added.add(song)
+                }
+            }
+            if (added.isNotEmpty()) {
+                persistQueue()
+            }
+        }
+        if (added.isEmpty()) return
+
+        _active.update { current ->
+            val updated = current.toMutableMap()
+            added.forEach { updated[it.videoId] = DownloadState.Queued }
+            updated
+        }
+        added.forEach { DownloadSession.queued(it, from) }
+
+        val app = context.applicationContext
+        val started = runCatching {
+            ContextCompat.startForegroundService(app, Intent(app, DownloadService::class.java))
+            true
+        }.getOrElse {
+            Log.w(TAG, "could not start the download service: ${it.message}")
+            false
+        }
+
+        if (!started) {
+            DownloadQueueWorker.enqueue(app)
+        }
+    }
+
+    /**
      * Drop [videoId] from the queue, or stop it if it is one of the ones
      * running.
      *

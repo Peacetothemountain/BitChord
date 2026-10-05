@@ -696,6 +696,49 @@ fun ConfirmationAlert(
 }
 
 /**
+ * An alert prompting the user when Wi-Fi-only downloading is enabled and a
+ * download is initiated over mobile data.
+ */
+@OptIn(ExperimentalHazeMaterialsApi::class)
+@Composable
+fun MobileDownloadAlert(
+    hazeState: HazeState,
+    onAllowOnce: () -> Unit,
+    onAlwaysAllow: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertScaffold(hazeState = hazeState, onDismiss = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 19.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = stringResource(R.string.download_over_mobile_title),
+                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp, fontWeight = FontWeight.W600),
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = stringResource(R.string.download_over_mobile_body),
+                modifier = Modifier.padding(top = 4.dp),
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 17.sp),
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+            )
+        }
+        AlertRule()
+        AlertAction(label = stringResource(R.string.download_now_mobile), emphasised = true, onClick = onAllowOnce)
+        AlertRule()
+        AlertAction(label = stringResource(R.string.always_allow_mobile), emphasised = false, onClick = onAlwaysAllow)
+        AlertRule()
+        AlertAction(label = stringResource(R.string.cancel), emphasised = false, onClick = onDismiss)
+    }
+}
+
+
+/**
  * Single-select list, ticked like [LyricsSourcesDialog] rather than with radio
  * buttons — same reasoning: a column of Material radios would be the one
  * Material thing left on an otherwise Apple-shaped alert.

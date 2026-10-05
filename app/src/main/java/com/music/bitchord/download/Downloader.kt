@@ -70,7 +70,10 @@ object Downloader {
         onProgress: (written: Long, total: Long) -> Unit,
     ): Long = withContext(Dispatchers.IO) {
         var url = stream.url
-        val total = contentLength(url) ?: error("Track unavailable: no length to fetch")
+        val total = contentLength(url) ?: run {
+            Log.w(TAG, "Content-Length unstated for $videoId; falling back to direct stream fetch")
+            return@withContext fetchDirect(url, StreamResolver.mediaHeadersFor(url), sink, onProgress)
+        }
 
         var position = 0L
         var reresolved = false
@@ -273,6 +276,7 @@ object Downloader {
                     ?.substringAfter('/', "")
                     ?.toLongOrNull()
                     ?.takeIf { it > 0 }
+                    ?: response.header("Content-Length")?.toLongOrNull()?.takeIf { it > 0 }
             }
         }.onFailure { Log.w(TAG, "could not measure the track: ${it.message}") }.getOrNull()
     }

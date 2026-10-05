@@ -317,6 +317,16 @@
     <string name="full_screen_cover_art">Full-screen cover art</string>
     <string name="legacy_mesh_gradient">Smokey animated background</string>
     <string name="legacy_mesh_gradient_subtitle">Atmospheric drifting smoke over the Material background</string>
+    <string name="download_over_mobile_title">Download over mobile data?</string>
+    <string name="download_over_mobile_body">Wi-Fi only downloads is enabled. Would you like to download using mobile data, or update your settings?</string>
+    <string name="download_now_mobile">Download now</string>
+    <string name="always_allow_mobile">Always allow mobile</string>
+    <string name="sync_yt_music">Sync YouTube Music</string>
+    <string name="sync_yt_music_downloads">Sync YouTube Music</string>
+    <string name="sync_yt_music_subtitle">Download your Liked Songs and playlists for offline listening</string>
+    <string name="syncing_yt_music">Syncing from YouTube Music…</string>
+    <string name="yt_music_sync_started">Started syncing Liked Music from YouTube Music</string>
+    <string name="yt_music_sync_done">Synced %1$d tracks from YouTube Music</string>
     <string name="animated_cover_art">Animated cover art</string>
     <string name="synced_lyrics">Synced lyrics</string>
     <string name="synced_lyrics_subtitle">Lights up the words on the player as they’re sung</string>

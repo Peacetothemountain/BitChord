@@ -126,11 +126,12 @@ class DownloadQueueWorker(
 
             val request = OneTimeWorkRequestBuilder<DownloadQueueWorker>()
                 .setConstraints(constraints)
+                .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .build()
 
             WorkManager.getInstance(context).enqueueUniqueWork(
                 WORK_NAME,
-                ExistingWorkPolicy.APPEND_OR_REPLACE,
+                ExistingWorkPolicy.REPLACE,
                 request,
             )
             Log.d(TAG, "Enqueued DownloadQueueWorker via WorkManager")

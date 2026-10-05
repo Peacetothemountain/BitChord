@@ -29,6 +29,12 @@ import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.ui.graphics.graphicsLayer
+import com.music.bitchord.download.sync.YtMusicDownloadSync
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -204,20 +210,48 @@ fun DownloadManagerSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier) {
                 .padding(start = 20.dp, end = 8.dp, top = 4.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val syncStatus by YtMusicDownloadSync.status.collectAsStateWithLifecycle()
+            val isSyncing = syncStatus.isSyncing
+            val syncRotation by animateFloatAsState(
+                targetValue = if (isSyncing) 360f else 0f,
+                animationSpec = if (isSyncing) infiniteRepeatable(
+                    animation = tween(1000, easing = LinearEasing),
+                    repeatMode = RepeatMode.Restart,
+                ) else tween(300),
+                label = "sheetSyncRotation",
+            )
             Column(Modifier.weight(1f)) {
                 Text(
                     text = stringResource(R.string.downloads),
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onBackground,
                 )
+                val syncSubtitle = if (syncStatus.isSyncing) {
+                    syncStatus.currentStep ?: stringResource(R.string.syncing_yt_music)
+                } else null
                 Text(
-                    text = session.summary(),
+                    text = syncSubtitle ?: session.summary(),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (session.failed > 0 && !session.busy) {
+                    color = if (syncSubtitle != null) {
+                        MaterialTheme.colorScheme.primary
+                    } else if (session.failed > 0 && !session.busy) {
                         MaterialTheme.colorScheme.error
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
+                )
+            }
+            IconButton(
+                onClick = {
+                    YtMusicDownloadSync.syncAllAsync(context.applicationContext)
+                },
+                enabled = !isSyncing,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Sync,
+                    contentDescription = stringResource(R.string.sync_yt_music_downloads),
+                    tint = if (isSyncing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.graphicsLayer { rotationZ = syncRotation },
                 )
             }
             if (session.busy) {

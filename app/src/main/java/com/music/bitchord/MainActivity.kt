@@ -184,9 +184,11 @@ import com.music.bitchord.download.DownloadStore
 import com.music.bitchord.download.MediaTagger
 import com.music.bitchord.download.DownloadTarget
 import com.music.bitchord.download.Downloads
+import com.music.bitchord.download.sync.YtMusicDownloadSync
 import com.music.bitchord.ui.components.BrowseActionsSheet
 import com.music.bitchord.ui.components.BrowseTarget
 import com.music.bitchord.ui.components.ConfirmationAlert
+import com.music.bitchord.ui.components.MobileDownloadAlert
 import com.music.bitchord.ui.components.DownloadManagerSheet
 import com.music.bitchord.ui.components.PlaylistPickerSheet
 import com.music.bitchord.ui.components.SongActionsSheet
@@ -1717,6 +1719,7 @@ private fun BitChordApp(
      * permission arrives as forty loose tracks.
      */
     var downloadPendingFrom by remember { mutableStateOf<DownloadTarget?>(null) }
+    var mobileDownloadPrompt by remember { mutableStateOf<Pair<List<Song>, DownloadTarget?>?>(null) }
     val notifyPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { /* Refusing costs the progress notification, not the download. */ }
@@ -1730,7 +1733,7 @@ private fun BitChordApp(
         when {
             songs.isEmpty() -> Unit
             granted -> {
-                songs.forEach { Downloads.enqueue(context, it, from?.title) }
+                Downloads.enqueueAll(context, songs, from?.title)
                 if (from != null) Downloads.markRequested(from.id, songs.map { it.videoId })
             }
             // The one case where refusing is fatal: below API 29 there is no
@@ -1775,6 +1778,43 @@ private fun BitChordApp(
             )
         }
     }
+    val executeDownload: (List<Song>, DownloadTarget?, Boolean) -> Unit = { songsToDownload, targetFrom, forceAllowMobile ->
+        if (songsToDownload.isNotEmpty()) {
+            val needsStorage = AppSettings.exportDownloads.value && DownloadStore.needsLegacyPermission() &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                ) != PackageManager.PERMISSION_GRANTED
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                notifyPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+
+            if (needsStorage) {
+                downloadPending = songsToDownload
+                downloadPendingFrom = targetFrom
+                storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            } else {
+                Downloads.enqueueAll(context, songsToDownload, targetFrom?.title, forceAllowMobile)
+                if (targetFrom != null) Downloads.markRequested(targetFrom.id, songsToDownload.map { it.videoId })
+            }
+        }
+        if (targetFrom != null) {
+            Downloads.rememberCollection(targetFrom, songsToDownload)
+            if (!targetFrom.thumbnailUrl.isNullOrBlank()) {
+                scope.launch(Dispatchers.IO) {
+                    MediaTagger.cacheArtwork(context.applicationContext, targetFrom.thumbnailUrl)
+                        ?.let { Downloads.rememberCollectionArtwork(targetFrom.id, it) }
+                }
+            }
+        }
+    }
+
     // Takes a list so a single tap on an album/playlist header can queue the
     // whole thing — the permission dance only needs to happen once for the
     // batch, not once per track.
@@ -1814,80 +1854,28 @@ private fun BitChordApp(
                     song
                 }
             }
-        // Asked here as well as inside [Downloads.enqueue] — not instead of it.
-        // Enqueue is the invariant and has to refuse whoever calls it, including
-        // the storage-permission continuation below, which resumes long enough
-        // after this check for the connection to have changed under it. This is
-        // the one place that knows the tap was for forty tracks and can say so
-        // once, rather than leaving forty identical failed rows to be read.
         val blocked = songs.isNotEmpty() && !AppSettings.downloadsAllowedNow
-        if (songs.isNotEmpty() && !blocked) {
-            val needsStorage = AppSettings.exportDownloads.value && DownloadStore.needsLegacyPermission() &&
-                ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                ) != PackageManager.PERMISSION_GRANTED
-
-            // Asked for here rather than at launch because here is where it means
-            // something: a download is the first thing this app does that the user
-            // is expected to walk away from.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.POST_NOTIFICATIONS,
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                notifyPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-
-            if (needsStorage) {
-                downloadPending = songs
-                downloadPendingFrom = from
-                storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            } else {
-                songs.forEach { Downloads.enqueue(context, it, from?.title) }
-                if (from != null) Downloads.markRequested(from.id, songs.map { it.videoId })
-            }
-        }
-        // Recorded for everything that was asked for, not just what still has to
-        // be fetched: a release whose tracks are already on the device is still
-        // that release, and the point of the record is to group them. Skipped
-        // only when the whole batch was refused, since then there will be
-        // nothing on disk for it to group.
-        if (from != null && !blocked) {
-            Downloads.rememberCollection(from, requested)
-            // A collection cover is not part of any audio file. Cache the
-            // header image separately so its Downloads card still has artwork
-            // with no connection, then atomically replace the remote URL in
-            // the persisted collection record.
-            if (!from.thumbnailUrl.isNullOrBlank()) {
-                scope.launch(Dispatchers.IO) {
-                    MediaTagger.cacheArtwork(context.applicationContext, from.thumbnailUrl)
-                        ?.let { Downloads.rememberCollectionArtwork(from.id, it) }
-                }
-            }
-        }
         when {
-            // The row's own icon reports a queued download, so a single tap
-            // normally needs no toast — but a refused one leaves the row exactly
-            // as it was, and a button that visibly does nothing is worse than a
-            // long message. So this one is said whatever the count.
-            blocked -> Toast.makeText(
-                context,
-                context.getString(R.string.wifi_only_download_refusal),
-                Toast.LENGTH_LONG,
-            ).show()
-            requested.size > 1 -> {
-                val message = if (songs.isEmpty()) {
-                    context.getString(R.string.already_downloaded)
-                } else {
-                    context.resources.getQuantityString(
+            blocked -> {
+                mobileDownloadPrompt = songs to from
+            }
+            songs.isNotEmpty() -> {
+                executeDownload(songs, from, false)
+                if (requested.size > 1) {
+                    val message = context.resources.getQuantityString(
                         R.plurals.downloading_song_count,
                         songs.size,
                         songs.size,
                     )
+                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                 }
-                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            }
+            requested.isNotEmpty() -> {
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.already_downloaded),
+                    Toast.LENGTH_SHORT,
+                ).show()
             }
         }
     }
@@ -2580,6 +2568,7 @@ private fun BitChordApp(
                                 } else {
                                     null
                                 },
+                            onSyncYtMusic = { YtMusicDownloadSync.syncAllAsync(context.applicationContext) },
                             onSongClick = { songs, index ->
                                 playFrom(
                                     songs,
@@ -4374,6 +4363,22 @@ private fun BitChordApp(
                     confirmJioSaavn = false
                 },
                 onDismiss = { confirmJioSaavn = false },
+            )
+        }
+
+        mobileDownloadPrompt?.let { (songs, from) ->
+            MobileDownloadAlert(
+                hazeState = hazeState,
+                onAllowOnce = {
+                    executeDownload(songs, from, true)
+                    mobileDownloadPrompt = null
+                },
+                onAlwaysAllow = {
+                    AppSettings.setWifiOnlyDownloads(false)
+                    executeDownload(songs, from, true)
+                    mobileDownloadPrompt = null
+                },
+                onDismiss = { mobileDownloadPrompt = null },
             )
         }
 

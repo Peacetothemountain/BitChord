@@ -55,8 +55,15 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.rounded.Sort
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.ui.graphics.graphicsLayer
+import com.music.bitchord.download.sync.YtMusicDownloadSync
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -172,6 +179,8 @@ fun LocalMusicScreen(
     onDeleteDownloads: ((List<Song>) -> Unit)? = null,
     /** Copies the selected Downloads rows to the WebDAV server; null hides the action. */
     onUploadToWebDav: ((List<Song>) -> Unit)? = null,
+    /** Triggers synchronization with user's YouTube Music downloads. */
+    onSyncYtMusic: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     // Which top-level tab is selected.
@@ -296,6 +305,7 @@ fun LocalMusicScreen(
                 if (isDownloads) AppSettings.setDownloadedMusicViewType(next)
                 else AppSettings.setLocalMusicViewType(next)
             },
+            onSyncYtMusic = if (isDownloads) onSyncYtMusic else null,
             modifier = Modifier.padding(
                 // The same clearance every other page under the frosted bar
                 // gets — see topBarContentPadding, which this screen can't use
@@ -1476,6 +1486,7 @@ private fun LocalSearchField(
     onSortOrderChange: (LocalMusicSort) -> Unit,
     viewType: LibraryViewType,
     onViewTypeToggle: () -> Unit,
+    onSyncYtMusic: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var sortMenuOpen by remember { mutableStateOf(false) }
@@ -1551,6 +1562,38 @@ private fun LocalSearchField(
             )
         }
         Spacer(Modifier.width(2.dp))
+        if (onSyncYtMusic != null) {
+            val syncState by YtMusicDownloadSync.status.collectAsStateWithLifecycle()
+            val isSyncing = syncState.isSyncing
+            val rotation by animateFloatAsState(
+                targetValue = if (isSyncing) 360f else 0f,
+                animationSpec = if (isSyncing) infiniteRepeatable(
+                    animation = tween(1000, easing = LinearEasing),
+                    repeatMode = RepeatMode.Restart,
+                ) else tween(300),
+                label = "syncRotation"
+            )
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .clickable(enabled = !isSyncing) {
+                        haptics.play(Haptic.Tap)
+                        onSyncYtMusic()
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Sync,
+                    contentDescription = stringResource(R.string.sync_yt_music_downloads),
+                    tint = if (isSyncing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(19.dp)
+                        .graphicsLayer { rotationZ = rotation },
+                )
+            }
+            Spacer(Modifier.width(2.dp))
+        }
         Box {
             Box(
                 modifier = Modifier

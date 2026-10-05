@@ -646,7 +646,7 @@ object StreamResolver {
             // answer; above it (best Opus over Standard's 128kbps) extraction
             // below can pick the lower rung, and this is kept as the fallback.
             val found = innerTubeXStream(videoId, maxKbps, requireM4a)
-                ?.takeIf { if (requireM4a) it.downloadExtension == "m4a" else it.downloadExtension == "webm" }
+                ?.takeIf { if (requireM4a) it.downloadExtension == "m4a" else (it.downloadExtension == "webm" || it.downloadExtension == "m4a") }
             if (found != null) {
                 offered = true
                 if (found.kbps <= maxKbps) return@withContext found
@@ -655,18 +655,23 @@ object StreamResolver {
 
             // The failsafe changes how the URL is found, not which container the
             // destination can accept.
-            val format = if (requireM4a) "MP4" else "Opus"
-            if (found == null) TrackLog.w(TAG, "InnerTubeX found no usable $format for $videoId; extracting")
+            val format = if (requireM4a) "MP4" else "Opus/MP4"
+            if (found == null) TrackLog.w(TAG, "InnerTubeX found no usable stream for $videoId; extracting")
             runCatching {
                 newPipeStream(videoId) { candidates ->
                     // Capped the same way as the player-response selection, off
                     // the same setting, or the failsafe would quietly hand back
                     // a rendition the user said they didn't want to keep.
                     val matching = candidates.filter {
-                        if (requireM4a) it.second.isM4a else it.second.isWebmOpus
+                        if (requireM4a) it.second.isM4a else (it.second.isWebmOpus || it.second.isM4a)
                     }
-                    underCeiling(matching, maxKbps)
-                        ?.also { offered = true }
+                    val preferred = if (!requireM4a) {
+                        val opusOnly = matching.filter { it.second.isWebmOpus }
+                        underCeiling(opusOnly, maxKbps) ?: underCeiling(matching, maxKbps)
+                    } else {
+                        underCeiling(matching, maxKbps)
+                    }
+                    preferred?.also { offered = true }
                 }
             }.onSuccess { return@withContext it }
                 .onFailure { TrackLog.w(TAG, "extraction found no $format for $videoId: ${it.message}") }

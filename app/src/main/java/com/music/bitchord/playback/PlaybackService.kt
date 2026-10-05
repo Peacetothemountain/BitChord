@@ -6429,7 +6429,20 @@ class PlaybackService : MediaLibraryService() {
         override fun seekToPrevious() {
             if (locked()) return
             onUserIntent()
+            crossfade.onSkipRequested()
             super.seekToPrevious()
+        }
+
+        override fun setShuffleModeEnabled(shuffleModeEnabled: Boolean) {
+            if (locked()) return
+            onUserIntent()
+            super.setShuffleModeEnabled(shuffleModeEnabled)
+        }
+
+        override fun setRepeatMode(repeatMode: Int) {
+            if (locked()) return
+            onUserIntent()
+            super.setRepeatMode(repeatMode)
         }
 
         override fun seekToDefaultPosition() {
@@ -6522,6 +6535,8 @@ class PlaybackService : MediaLibraryService() {
         override fun getAvailableCommands(): Player.Commands {
             val base = super.getAvailableCommands()
             val builder = base.buildUpon()
+            builder.add(Player.COMMAND_SET_SHUFFLE_MODE)
+            builder.add(Player.COMMAND_SET_REPEAT_MODE)
             if (mediaItemCount > 0) {
                 builder.add(COMMAND_SEEK_TO_NEXT)
                 builder.add(COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
@@ -6532,6 +6547,9 @@ class PlaybackService : MediaLibraryService() {
         }
 
         override fun isCommandAvailable(command: Int): Boolean {
+            if (command == Player.COMMAND_SET_SHUFFLE_MODE || command == Player.COMMAND_SET_REPEAT_MODE) {
+                return true
+            }
             if (mediaItemCount > 0) {
                 if (command == COMMAND_SEEK_TO_NEXT ||
                     command == COMMAND_SEEK_TO_NEXT_MEDIA_ITEM ||
@@ -6652,8 +6670,17 @@ class PlaybackService : MediaLibraryService() {
                 .add(reorderQueueCommand)
                 .add(queueDragCommand)
                 .build()
+            val playerCommands = session.player.availableCommands.buildUpon()
+                .addAll(MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS)
+                .add(Player.COMMAND_SEEK_TO_NEXT)
+                .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+                .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                .add(Player.COMMAND_SET_SHUFFLE_MODE)
+                .add(Player.COMMAND_SET_REPEAT_MODE)
+                .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-                .setAvailablePlayerCommands(MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS)
+                .setAvailablePlayerCommands(playerCommands)
                 .setAvailableSessionCommands(sessionCommands)
                 .build()
         }

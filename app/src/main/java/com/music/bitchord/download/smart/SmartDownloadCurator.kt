@@ -1,4 +1,4 @@
-﻿package com.music.bitchord.download.smart
+package com.music.bitchord.download.smart
 
 import android.content.Context
 import com.music.bitchord.data.YtMusicRepository
@@ -31,7 +31,12 @@ object SmartDownloadCurator {
             }
         }
 
-        // 1. Personalized Quick Picks / Supermix (highest quality recommendations from YouTube Music)
+        // 1. YouTube Music Liked Music (highest personal affinity)
+        runCatching {
+            YtMusicRepository.browseSongs(YtMusicRepository.LIKED_MUSIC).getOrNull()?.let { addSongs(it.songs) }
+        }
+
+        // 2. Personalized Quick Picks / Supermix (highest quality recommendations from YouTube Music)
         runCatching {
             YtMusicRepository.quickPicks().getOrNull()?.let { addSongs(it) }
         }
