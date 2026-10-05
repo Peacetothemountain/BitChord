@@ -243,6 +243,7 @@ import com.music.bitchord.ui.screens.HomeScreen
 import com.music.bitchord.ui.screens.LibraryGridPage
 import com.music.bitchord.ui.screens.LibraryScreen
 import com.music.bitchord.ui.screens.MoodGenrePlaylistsScreen
+import com.music.bitchord.ui.screens.FoldableSearchScreen
 import com.music.bitchord.ui.screens.SearchScreen
 import com.music.bitchord.data.settings.SongSort
 import com.music.bitchord.ui.replay.ReplayScreen
@@ -2780,7 +2781,7 @@ private fun BitChordApp(
                             pullState = explorePull,
                             contentPadding = listPadding,
                         )
-                        TAB_SEARCH -> SearchScreen(
+                        TAB_SEARCH -> FoldableSearchScreen(
                             query = query,
                             onQueryChange = viewModel::onQueryChange,
                             filter = filter,
