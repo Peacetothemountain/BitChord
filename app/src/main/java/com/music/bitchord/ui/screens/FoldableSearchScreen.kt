@@ -215,6 +215,14 @@ fun FoldableSearchScreen(
     onTypeaheadLongPress: ((Song) -> Unit)? = null,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
+    currentSong: Song? = null,
+    isPlaying: Boolean = false,
+    topPadding: Dp = 0.dp,
+    showField: Boolean = true,
+    searchingLibrary: Boolean = false,
+    libraryResults: UiState<List<Song>>? = null,
+    onLibrarySongClick: (List<Song>, Int) -> Unit = onSongClick,
+    sourceSwitcher: (@Composable () -> Unit)? = null,
 ) {
     val posture by rememberFoldablePosture()
     var selectedPreview by remember { mutableStateOf<SelectedSearchPreview?>(null) }
@@ -269,6 +277,14 @@ fun FoldableSearchScreen(
                     onHistoryClear = onHistoryClear,
                     onTypeaheadLongPress = onTypeaheadLongPress,
                     contentPadding = contentPadding,
+                    currentSong = currentSong,
+                    isPlaying = isPlaying,
+                    topPadding = topPadding,
+                    showField = showField,
+                    searchingLibrary = searchingLibrary,
+                    libraryResults = libraryResults,
+                    onLibrarySongClick = onLibrarySongClick,
+                    sourceSwitcher = sourceSwitcher,
                 )
             }
 
@@ -316,6 +332,14 @@ fun FoldableSearchScreen(
                     contentPadding = contentPadding,
                     selectedPreview = selectedPreview,
                     onClearPreview = { selectedPreview = null },
+                    currentSong = currentSong,
+                    isPlaying = isPlaying,
+                    topPadding = topPadding,
+                    showField = showField,
+                    searchingLibrary = searchingLibrary,
+                    libraryResults = libraryResults,
+                    onLibrarySongClick = onLibrarySongClick,
+                    sourceSwitcher = sourceSwitcher,
                 )
             }
 
@@ -325,6 +349,8 @@ fun FoldableSearchScreen(
                     query = query,
                     onQueryChange = onQueryChange,
                     filter = filter,
+                    currentSong = currentSong,
+                    isPlaying = isPlaying,
                     onFilterChange = onFilterChange,
                     results = results,
                     loadingMore = loadingMore,
@@ -350,6 +376,12 @@ fun FoldableSearchScreen(
                     onHistoryClear = onHistoryClear,
                     onTypeaheadLongPress = onTypeaheadLongPress,
                     contentPadding = contentPadding,
+                    topPadding = topPadding,
+                    showField = showField,
+                    searchingLibrary = searchingLibrary,
+                    libraryResults = libraryResults,
+                    onLibrarySongClick = onLibrarySongClick,
+                    sourceSwitcher = sourceSwitcher,
                 )
             }
         }
@@ -393,6 +425,14 @@ private fun DualPaneBookSearchLayout(
     contentPadding: PaddingValues,
     selectedPreview: SelectedSearchPreview?,
     onClearPreview: () -> Unit,
+    currentSong: Song? = null,
+    isPlaying: Boolean = false,
+    topPadding: Dp = 0.dp,
+    showField: Boolean = true,
+    searchingLibrary: Boolean = false,
+    libraryResults: UiState<List<Song>>? = null,
+    onLibrarySongClick: (List<Song>, Int) -> Unit = onSongClick,
+    sourceSwitcher: (@Composable () -> Unit)? = null,
 ) {
     Row(modifier = Modifier.fillMaxSize()) {
         // Left Pane: Search Input & Results (52% width)
@@ -405,6 +445,8 @@ private fun DualPaneBookSearchLayout(
                 query = query,
                 onQueryChange = onQueryChange,
                 filter = filter,
+                currentSong = currentSong,
+                isPlaying = isPlaying,
                 onFilterChange = onFilterChange,
                 results = results,
                 loadingMore = loadingMore,
@@ -430,6 +472,12 @@ private fun DualPaneBookSearchLayout(
                 onHistoryClear = onHistoryClear,
                 onTypeaheadLongPress = onTypeaheadLongPress,
                 contentPadding = contentPadding,
+                topPadding = topPadding,
+                showField = showField,
+                searchingLibrary = searchingLibrary,
+                libraryResults = libraryResults,
+                onLibrarySongClick = onLibrarySongClick,
+                sourceSwitcher = sourceSwitcher,
             )
         }
 
@@ -669,6 +717,14 @@ private fun TabletopSearchLayout(
     onHistoryClear: () -> Unit,
     onTypeaheadLongPress: ((Song) -> Unit)?,
     contentPadding: PaddingValues,
+    currentSong: Song? = null,
+    isPlaying: Boolean = false,
+    topPadding: Dp = 0.dp,
+    showField: Boolean = true,
+    searchingLibrary: Boolean = false,
+    libraryResults: UiState<List<Song>>? = null,
+    onLibrarySongClick: (List<Song>, Int) -> Unit = onSongClick,
+    sourceSwitcher: (@Composable () -> Unit)? = null,
 ) {
     val density = LocalDensity.current
     val hingeHeightDp = with(density) { hingeBounds.height().toDp() }
@@ -684,6 +740,8 @@ private fun TabletopSearchLayout(
                 query = query,
                 onQueryChange = onQueryChange,
                 filter = filter,
+                currentSong = currentSong,
+                isPlaying = isPlaying,
                 onFilterChange = onFilterChange,
                 results = results,
                 loadingMore = loadingMore,
@@ -709,6 +767,12 @@ private fun TabletopSearchLayout(
                 onHistoryClear = onHistoryClear,
                 onTypeaheadLongPress = onTypeaheadLongPress,
                 contentPadding = PaddingValues(bottom = 8.dp),
+                topPadding = topPadding,
+                showField = showField,
+                searchingLibrary = searchingLibrary,
+                libraryResults = libraryResults,
+                onLibrarySongClick = onLibrarySongClick,
+                sourceSwitcher = sourceSwitcher,
             )
         }
 
